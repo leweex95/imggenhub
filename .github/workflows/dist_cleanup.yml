@@ -1,0 +1,45 @@
+name: Distribution cleanup
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  cleanup-dist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # fetch all tags
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Cleanup old dist files
+        run: |
+          cd dist
+          for tag in $(git tag --sort=-creatordate); do
+              files=( *${tag}* )
+              if [ ${#files[@]} -gt 1 ]; then
+                  # keep newest, delete older
+                  newest="${files[-1]}"
+                  for f in "${files[@]}"; do
+                      if [ "$f" != "$newest" ]; then
+                          rm "$f"
+                      fi
+                  done
+              fi
+          done
+          cd ..
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dist/
+          git commit -m "Remove older distribution artifacts" || echo "No changes to commit"
+          git push origin HEAD
