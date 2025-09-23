@@ -1,0 +1,6 @@
+{
+    "title": "Hugging Face Token Secret",
+    "id": "leventecsibi/huggingface-token",
+    "licenses": [{"name": "CC0-1.0"}],
+    "description": "Dataset containing Hugging Face token for secure usage in Kaggle kernels."
+  }
