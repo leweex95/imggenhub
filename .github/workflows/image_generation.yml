@@ -41,6 +41,8 @@ on:
 jobs:
   generate-images:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Allow pushing to repository
     
     steps:
       - name: Checkout code
@@ -153,14 +155,26 @@ jobs:
 
       - name: Commit and push generated images
         env:
-          # PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
           DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
         run: |
+          # Check if there are any images to commit first
+          if [ ! -d "$DEST_FOLDER" ] || [ -z "$(find "$DEST_FOLDER" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" 2>/dev/null)" ]; then
+            echo "⚠️  No images found to commit"
+            exit 0
+          fi
+          
           # Add generated images to git
           git add "$DEST_FOLDER"
+          
+          # Check if there are actually changes staged
+          if git diff --staged --quiet; then
+            echo "⚠️  No new changes to commit"
+            exit 0
+          fi
           
           # Create commit message with generation details
           COMMIT_MSG="🎨 Add generated images [skip ci]
@@ -174,23 +188,46 @@ jobs:
           Workflow: ${{ github.workflow }}
           Run: ${{ github.run_number }}"
           
-          # Check if there are changes to commit
-          if git diff --quiet && git diff --staged --quiet; then
-            echo "⚠️  No new images to commit"
-            exit 0
-          fi
-          
-          git commit -m "$COMMIT_MSG"
-          
-          # Push with retries (borrowed from your jarokelo_tracker pattern)
-          RETRIES=10
+          # Commit and push with retry logic
+          RETRIES=5
           for i in $(seq 1 $RETRIES); do
-            git pull --rebase origin master
-            git push https://x-access-token:$PAT_TOKEN@github.com/${{ github.repository }} HEAD:master && break || {
-              echo "Push failed, retrying ($i/$RETRIES)..."
-              sleep 3
+            echo "Attempt $i/$RETRIES: Committing and pushing..."
+            
+            # Try to pull the latest changes first (before committing)
+            echo "Pulling latest changes..."
+            git pull origin master --rebase || {
+              echo "⚠️  Pull failed, will try to push anyway"
             }
+            
+            # Commit the changes
+            echo "Committing changes..."
+            git commit -m "$COMMIT_MSG" || {
+              echo "❌ Commit failed"
+              exit 1
+            }
+            
+            # Try to push
+            echo "Pushing to remote..."
+            if git push https://x-access-token:$PAT_TOKEN@github.com/${{ github.repository }} HEAD:master; then
+              echo "✅ Successfully pushed changes on attempt $i"
+              break
+            else
+              echo "❌ Push failed on attempt $i/$RETRIES"
+              if [ $i -lt $RETRIES ]; then
+                echo "Resetting commit and retrying..."
+                git reset --soft HEAD~1
+                sleep 2
+              fi
+            fi
           done
+          
+          # Final check
+          if [ $i -eq $RETRIES ] && ! git log --oneline -1 | grep -q "Add generated images"; then
+            echo "❌ Failed to push after $RETRIES attempts"
+            exit 1
+          else
+            echo "✅ Images successfully committed and pushed!"
+          fi
 
   notify-completion:
     needs: generate-images
