@@ -141,30 +141,7 @@ jobs:
           print('Monitoring completed.')
           "
 
-      - name: Cancel running kernel (cleanup)
-        if: always()
-        run: |
-          echo "Canceling running kernel to cleanup..."
-          cd src/imggenhub/kaggle
-          
-          python -c "
-          import sys
-          import os
-          from pathlib import Path
-          sys.path.insert(0, os.path.join('..', '..'))
-          from imggenhub.kaggle.utils.poll_status import cancel_kernel
-          
-          # Cancel the kernel - this will handle errors gracefully
-          success = cancel_kernel('leventecsibi/stable-diffusion-batch-generator')
-          
-          if success:
-              print('✅ Kernel canceled successfully')
-          else:
-              print('⚠️  Kernel cancellation failed or kernel was already stopped')
-              print('This is not necessarily an error - kernel might have completed naturally')
-          
-          print('Cleanup step completed')
-          "
+
 
       - name: Regression test summary
         if: always()
@@ -172,7 +149,6 @@ jobs:
           echo "=== Kaggle Regression Test Summary ==="
           echo "✅ Kernel deployment: SUCCESS"
           echo "✅ Status monitoring: SUCCESS"
-          echo "✅ Kernel cancellation: SUCCESS"
           echo ""
           echo "The regression test validates that:"
           echo "1. Kaggle kernel can be deployed successfully"
@@ -182,6 +158,8 @@ jobs:
           echo "Note: This test doesn't run the full image generation pipeline"
           echo "to avoid consuming GPU quota and time. It only validates the"
           echo "deployment and monitoring infrastructure."
+          echo ""
+          echo "The deployed kernel will continue running and complete naturally."
 
   notify:
     needs: kaggle-regression-test

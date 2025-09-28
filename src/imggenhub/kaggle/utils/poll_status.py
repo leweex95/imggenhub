@@ -37,43 +37,6 @@ def run(kernel_id=None, poll_interval=None):
         time.sleep(poll_interval)
 
 
-def cancel_kernel(kernel_id=None):
-    """Cancel a running Kaggle kernel"""
-    kernel_id = kernel_id or KERNEL_ID
-    
-    logging.info(f"Attempting to cancel kernel: {kernel_id}")
-    
-    try:
-        # First check current status
-        kaggle_cmd = _get_kaggle_command()
-        status_result = subprocess.run(
-            [*kaggle_cmd, "kernels", "status", kernel_id],
-            capture_output=True, text=True, check=False
-        )
-        
-        if status_result.returncode == 0:
-            logging.info(f"Current status: {status_result.stdout.strip()}")
-        
-        # Cancel the kernel
-        cancel_result = subprocess.run(
-            [*kaggle_cmd, "kernels", "cancel", kernel_id],
-            capture_output=True, text=True, check=False
-        )
-        
-        if cancel_result.returncode == 0:
-            logging.info("Kernel canceled successfully")
-            logging.info(cancel_result.stdout.strip())
-            return True
-        else:
-            logging.warning(f"Cancel command returned exit code {cancel_result.returncode}")
-            logging.warning(f"stdout: {cancel_result.stdout.strip()}")
-            logging.warning(f"stderr: {cancel_result.stderr.strip()}")
-            return False
-            
-    except Exception as e:
-        logging.error(f"Error canceling kernel: {e}")
-        return False
-
 
 def _get_kaggle_command():
     """
