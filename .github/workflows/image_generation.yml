@@ -1,0 +1,221 @@
+name: Image generation
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Single prompt for image generation'
+        required: true
+        type: string
+      platform:
+        description: 'Platform to use for image generation'
+        required: false
+        default: 'kaggle'
+        type: choice
+        options:
+        - 'kaggle'
+      model_name:
+        description: 'Hugging Face model to use for generation'
+        required: false
+        default: 'stabilityai/stable-diffusion-xl-base-1.0'
+        type: choice
+        options:
+        - 'stabilityai/stable-diffusion-xl-base-1.0'
+        - 'runwayml/stable-diffusion-v1-5'
+        - 'stabilityai/stable-diffusion-2-1'
+        - 'CompVis/stable-diffusion-v1-4'
+      enable_gpu:
+        description: 'Enable GPU for faster generation'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      dest_folder:
+        description: 'Destination folder for generated images'
+        required: false
+        default: 'output_images'
+        type: string
+
+jobs:
+  generate-images:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install --no-interaction
+
+      - name: Setup Kaggle credentials
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Generate images via Kaggle pipeline
+        env:
+          PROMPT: ${{ github.event.inputs.prompt }}
+          MODEL_NAME: ${{ github.event.inputs.model_name }}
+          GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
+          DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+        run: |
+          echo "Starting image generation with:"
+          echo "Prompt: $PROMPT"
+          echo "Model: $MODEL_NAME"
+          echo "GPU: $GPU_SETTING"
+          echo "Destination: $DEST_FOLDER"
+          echo ""
+          
+          cd src/imggenhub/kaggle
+          
+          # Build the command with proper arguments
+          ARGS="--prompt \"$PROMPT\" --dest ../../../$DEST_FOLDER"
+          
+          if [ "$MODEL_NAME" != "stabilityai/stable-diffusion-xl-base-1.0" ]; then
+            ARGS="$ARGS --model_name \"$MODEL_NAME\""
+          fi
+          
+          if [ "$GPU_SETTING" = "true" ]; then
+            ARGS="$ARGS --gpu"
+          fi
+          
+          echo "Running: python -m imggenhub.kaggle.main $ARGS"
+          echo ""
+          
+          # Run the full pipeline (deploy -> poll -> download)
+          eval "python -c \"
+          import sys
+          import os
+          from pathlib import Path
+          sys.path.insert(0, os.path.join('..', '..'))
+          from imggenhub.kaggle.main import run_pipeline
+          
+          run_pipeline(
+              prompts_file=None,
+              notebook='config/kaggle-notebook-image-generation.ipynb',
+              kernel_path='config',
+              gpu=$GPU_SETTING,
+              dest='../../../$DEST_FOLDER',
+              model_name='$MODEL_NAME' if '$MODEL_NAME' != 'stabilityai/stable-diffusion-xl-base-1.0' else None,
+              prompt='$PROMPT',
+              prompts=None
+          )
+          \""
+
+      - name: Verify generated images
+        env:
+          DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+        run: |
+          echo "Generated images summary:"
+          if [ -d "$DEST_FOLDER" ]; then
+            IMAGE_COUNT=$(find "$DEST_FOLDER" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) | wc -l)
+            echo "Found $IMAGE_COUNT image(s) in $DEST_FOLDER/"
+            
+            echo ""
+            echo "📁 Files generated:"
+            find "$DEST_FOLDER" -type f -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" | head -10
+            
+            # Show total size
+            TOTAL_SIZE=$(du -sh "$DEST_FOLDER" | cut -f1)
+            echo ""
+            echo "💾 Total size: $TOTAL_SIZE"
+          else
+            echo "No output directory found!"
+            exit 1
+          fi
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Commit and push generated images
+        env:
+          # PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+          PROMPT: ${{ github.event.inputs.prompt }}
+          MODEL_NAME: ${{ github.event.inputs.model_name }}
+          GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
+        run: |
+          # Add generated images to git
+          git add "$DEST_FOLDER"
+          
+          # Create commit message with generation details
+          COMMIT_MSG="🎨 Add generated images [skip ci]
+
+          Prompt: $PROMPT
+          Model: $MODEL_NAME
+          GPU: $GPU_SETTING
+          Destination: $DEST_FOLDER
+          
+          Generated on: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          Workflow: ${{ github.workflow }}
+          Run: ${{ github.run_number }}"
+          
+          # Check if there are changes to commit
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "⚠️  No new images to commit"
+            exit 0
+          fi
+          
+          git commit -m "$COMMIT_MSG"
+          
+          # Push with retries (borrowed from your jarokelo_tracker pattern)
+          RETRIES=10
+          for i in $(seq 1 $RETRIES); do
+            git pull --rebase origin master
+            git push https://x-access-token:$PAT_TOKEN@github.com/${{ github.repository }} HEAD:master && break || {
+              echo "Push failed, retrying ($i/$RETRIES)..."
+              sleep 3
+            }
+          done
+
+  notify-completion:
+    needs: generate-images
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send completion email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🎨 [ImgGenHub] Image Generation ${{ needs.generate-images.result == 'success' && 'Completed' || 'Failed' }}"
+          html_body: |
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:22px; font-weight:bold; color:${{ needs.generate-images.result == 'success' && 'green' || 'red' }};">
+              🎨 Image Generation ${{ needs.generate-images.result == 'success' && 'Completed Successfully!' || 'Failed!' }}
+            </p>
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
+              <strong>Generation Details:</strong>
+            </p>
+            <ul style="font-family: 'Roboto', Helvetica, sans-serif; font-size:16px;">
+              <li><strong>Prompt:</strong> ${{ github.event.inputs.prompt }}</li>
+              <li><strong>Model:</strong> ${{ github.event.inputs.model_name }}</li>
+              <li><strong>GPU:</strong> ${{ github.event.inputs.enable_gpu }}</li>
+              <li><strong>Destination:</strong> ${{ github.event.inputs.dest_folder }}</li>
+            </ul>
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
+              ${{ needs.generate-images.result == 'success' && 'Generated images have been automatically committed to the repository.' || 'Check the workflow logs for error details.' }}
+            </p>
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
+              View workflow: <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">
+              Workflow Run</a>
+            </p>
+          to: ${{ secrets.EMAIL_USERNAME }}
+          from: ImgGenHub <${{ secrets.EMAIL_USERNAME }}>
