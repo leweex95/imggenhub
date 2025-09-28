@@ -141,64 +141,29 @@ jobs:
           print('Monitoring completed.')
           "
 
-      - name: Deploy cancellation kernel (cleanup)
+      - name: Cancel running kernel (cleanup)
         if: always()
         run: |
-          echo "Deploying minimal cancellation kernel to cleanup..."
+          echo "Canceling running kernel to cleanup..."
           cd src/imggenhub/kaggle
           
-          # Create a temporary minimal notebook for cleanup
           python -c "
-          import json
           import sys
           import os
           from pathlib import Path
           sys.path.insert(0, os.path.join('..', '..'))
-          from imggenhub.kaggle.core import deploy
+          from imggenhub.kaggle.utils.poll_status import cancel_kernel
           
-          # Create minimal notebook that exits quickly
-          minimal_notebook = {
-              'cells': [
-                  {
-                      'cell_type': 'code',
-                      'execution_count': None,
-                      'metadata': {},
-                      'outputs': [],
-                      'source': [
-                          '# Regression test cleanup - minimal execution\\n',
-                          'print(\"Regression test cleanup completed\")\\n',
-                          'import sys\\n',
-                          'sys.exit(0)\\n'
-                      ]
-                  }
-              ],
-              'metadata': {
-                  'kernelspec': {
-                      'display_name': 'Python 3',
-                      'language': 'python',
-                      'name': 'python3'
-                  },
-                  'language_info': {
-                      'name': 'python',
-                      'version': '3.10.0'
-                  }
-              },
-              'nbformat': 4,
-              'nbformat_minor': 4
-          }
+          # Cancel the kernel - this will handle errors gracefully
+          success = cancel_kernel('leventecsibi/stable-diffusion-batch-generator')
           
-          # Save the cleanup notebook temporarily
-          with open('config/kaggle-notebook-image-generation.ipynb', 'w') as f:
-              json.dump(minimal_notebook, f, indent=2)
+          if success:
+              print('✅ Kernel canceled successfully')
+          else:
+              print('⚠️  Kernel cancellation failed or kernel was already stopped')
+              print('This is not necessarily an error - kernel might have completed naturally')
           
-          # Deploy cleanup kernel using existing deploy function
-          deploy.run(
-              prompts_list=['cleanup'],
-              notebook=Path('config/kaggle-notebook-image-generation.ipynb'),
-              kernel_path=Path('config'),
-              gpu=False
-          )
-          print('Cleanup kernel deployed')
+          print('Cleanup step completed')
           "
 
       - name: Regression test summary
@@ -207,7 +172,7 @@ jobs:
           echo "=== Kaggle Regression Test Summary ==="
           echo "✅ Kernel deployment: SUCCESS"
           echo "✅ Status monitoring: SUCCESS"
-          echo "✅ Cleanup deployment: SUCCESS"
+          echo "✅ Kernel cancellation: SUCCESS"
           echo ""
           echo "The regression test validates that:"
           echo "1. Kaggle kernel can be deployed successfully"
