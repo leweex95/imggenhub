@@ -56,6 +56,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install poetry
           poetry install --no-interaction
+          # Install kaggle package directly to system Python to ensure CLI availability
+          pip install kaggle
 
       - name: Setup Kaggle credentials
         env:
@@ -97,24 +99,30 @@ jobs:
           echo ""
           
           # Run the full pipeline (deploy -> poll -> download)
-          eval "python -c \"
+          python -c "
           import sys
           import os
           from pathlib import Path
           sys.path.insert(0, os.path.join('..', '..'))
           from imggenhub.kaggle.main import run_pipeline
           
+          # Convert shell variables to proper Python types
+          gpu_enabled = os.getenv('GPU_SETTING', 'false').lower() == 'true'
+          model_name = os.getenv('MODEL_NAME')
+          if model_name == 'stabilityai/stable-diffusion-xl-base-1.0':
+              model_name = None
+          
           run_pipeline(
               prompts_file=None,
               notebook='config/kaggle-notebook-image-generation.ipynb',
               kernel_path='config',
-              gpu=$GPU_SETTING,
-              dest='../../../$DEST_FOLDER',
-              model_name='$MODEL_NAME' if '$MODEL_NAME' != 'stabilityai/stable-diffusion-xl-base-1.0' else None,
-              prompt='$PROMPT',
+              gpu=gpu_enabled,
+              dest='../../../' + os.getenv('DEST_FOLDER', 'output_images'),
+              model_name=model_name,
+              prompt=os.getenv('PROMPT'),
               prompts=None
           )
-          \""
+          "
 
       - name: Verify generated images
         env:
