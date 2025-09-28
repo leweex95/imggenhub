@@ -2,6 +2,8 @@ import subprocess
 import time
 import re
 import logging
+import shutil
+from pathlib import Path
 
 KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
 POLL_INTERVAL = 10  # seconds
@@ -15,8 +17,9 @@ def run(kernel_id=None, poll_interval=None):
 
     while True:
         # Run `kaggle kernels status`
+        kaggle_cmd = _get_kaggle_command()
         result = subprocess.run(
-            ["python", "-m", "kaggle.cli", "kernels", "status", kernel_id],
+            [*kaggle_cmd, "kernels", "status", kernel_id],
             capture_output=True, text=True
         )
         if result.returncode != 0:
@@ -32,3 +35,28 @@ def run(kernel_id=None, poll_interval=None):
             break
 
         time.sleep(poll_interval)
+
+
+def _get_kaggle_command():
+    """
+    Get the appropriate command to run Kaggle CLI.
+    
+    Returns:
+        list: Command parts to execute kaggle CLI
+    """
+    # Check if poetry is available and we're in a poetry project
+    if shutil.which("poetry") and Path("pyproject.toml").exists():
+        try:
+            # Test if poetry can run the kaggle command
+            result = subprocess.run(
+                ["poetry", "run", "python", "-c", "import kaggle"],
+                capture_output=True,
+                check=False
+            )
+            if result.returncode == 0:
+                return ["poetry", "run", "python", "-m", "kaggle.cli"]
+        except Exception:
+            pass
+    
+    # Fallback to direct python call
+    return ["python", "-m", "kaggle.cli"]

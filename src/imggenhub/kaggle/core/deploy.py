@@ -3,6 +3,7 @@ import re
 import json
 from pathlib import Path
 import subprocess
+import shutil
 
 
 def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_path=".", gpu=None, model_id=None):
@@ -43,5 +44,31 @@ def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(kernel_meta, f, indent=2)
 
-    # Push via Kaggle CLI
-    subprocess.run(["python", "-m", "kaggle.cli", "kernels", "push", "-p", str(kernel_path)], check=True)
+    # Push via Kaggle CLI - try Poetry first, fallback to direct python
+    kaggle_cmd = _get_kaggle_command()
+    subprocess.run([*kaggle_cmd, "kernels", "push", "-p", str(kernel_path)], check=True)
+
+
+def _get_kaggle_command():
+    """
+    Get the appropriate command to run Kaggle CLI.
+    
+    Returns:
+        list: Command parts to execute kaggle CLI
+    """
+    # Check if poetry is available and we're in a poetry project
+    if shutil.which("poetry") and Path("pyproject.toml").exists():
+        try:
+            # Test if poetry can run the kaggle command
+            result = subprocess.run(
+                ["poetry", "run", "python", "-c", "import kaggle"],
+                capture_output=True,
+                check=False
+            )
+            if result.returncode == 0:
+                return ["poetry", "run", "python", "-m", "kaggle.cli"]
+        except Exception:
+            pass
+    
+    # Fallback to direct python call
+    return ["python", "-m", "kaggle.cli"]
