@@ -43,8 +43,13 @@ def run_pipeline(prompts_file, notebook, kernel_path, gpu=False, dest="output_im
 
     # Step 2: Poll status
     logging.info("Polling kernel status...")
-    poll_status.run()
+    status = poll_status.run()
     logging.debug("Poll status completed")
+
+    if status == "kernelworkerstatus.error":
+        log_path = dest / "stable-diffusion-batch-generator.log"
+        logging.error(f"Kernel failed. See log: {log_path}")
+        raise RuntimeError("Kaggle kernel failed during image generation. Aborting pipeline.")
 
     # Step 3: Download output
     logging.info("Downloading output artifacts...")

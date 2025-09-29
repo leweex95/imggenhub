@@ -24,7 +24,7 @@ def run(kernel_id=None, poll_interval=None):
         )
         if result.returncode != 0:
             logging.error("Error fetching status: %s", result.stderr.strip())
-            break
+            return "unknown"
 
         match = re.search(r'has status "(.*)"', result.stdout)
         status = match.group(1) if match else "unknown"
@@ -32,11 +32,9 @@ def run(kernel_id=None, poll_interval=None):
 
         if status.lower() in ["kernelworkerstatus.complete", "kernelworkerstatus.error"]:
             logging.info("Kernel finished with status: %s", status)
-            break
+            return status.lower()
 
         time.sleep(poll_interval)
-
-
 
 def _get_kaggle_command():
     """

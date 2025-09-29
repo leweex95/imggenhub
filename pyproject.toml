@@ -1,6 +1,6 @@
 [project]
 name = "imggenhub"
-version = "1.2.0"
+version = "1.2.1"
 description = ""
 authors = [
     {name = "leweex95",email = "csibi.levente14@gmail.com"}
