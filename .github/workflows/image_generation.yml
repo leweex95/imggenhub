@@ -164,21 +164,22 @@ jobs:
         run: |
           # Check if there are any images to commit first
           if [ ! -d "$DEST_FOLDER" ] || [ -z "$(find "$DEST_FOLDER" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" 2>/dev/null)" ]; then
-            echo "⚠️  No images found to commit"
+            echo "No images found to commit"
             exit 0
           fi
-          
+        
+          # Always sync with remote first
+          git fetch origin master
+          git reset --hard origin/master
+
           # Add generated images to git
           git add "$DEST_FOLDER"
-          
-          # Check if there are actually changes staged
           if git diff --staged --quiet; then
-            echo "⚠️  No new changes to commit"
+            echo "No new changes to commit"
             exit 0
           fi
           
-          # Create commit message with generation details
-          COMMIT_MSG="🎨 Add generated images [skip ci]
+          COMMIT_MSG="[Auto-commit] Added generated images [skip ci]
 
           Prompt: $PROMPT
           Model: $MODEL_NAME
@@ -189,46 +190,23 @@ jobs:
           Workflow: ${{ github.workflow }}
           Run: ${{ github.run_number }}"
           
-          # Commit and push with retry logic
+          # Commit once
+          git commit -m "$COMMIT_MSG"
+
+          # Push with retries
           RETRIES=5
           for i in $(seq 1 $RETRIES); do
-            echo "Attempt $i/$RETRIES: Committing and pushing..."
-            
-            # Try to pull the latest changes first (before committing)
-            echo "Pulling latest changes..."
-            git pull origin master --rebase || {
-              echo "⚠️  Pull failed, will try to push anyway"
-            }
-            
-            # Commit the changes
-            echo "Committing changes..."
-            git commit -m "$COMMIT_MSG" || {
-              echo "❌ Commit failed"
-              exit 1
-            }
-            
-            # Try to push
-            echo "Pushing to remote..."
             if git push https://x-access-token:$PAT_TOKEN@github.com/${{ github.repository }} HEAD:master; then
-              echo "✅ Successfully pushed changes on attempt $i"
-              break
+              echo "Successfully pushed changes."
+              exit 0
             else
-              echo "❌ Push failed on attempt $i/$RETRIES"
-              if [ $i -lt $RETRIES ]; then
-                echo "Resetting commit and retrying..."
-                git reset --soft HEAD~1
-                sleep 2
-              fi
+              echo "Push failed on attempt $i/$RETRIES, retrying..."
+              sleep 2
             fi
           done
-          
-          # Final check
-          if [ $i -eq $RETRIES ] && ! git log --oneline -1 | grep -q "Add generated images"; then
-            echo "❌ Failed to push after $RETRIES attempts"
-            exit 1
-          else
-            echo "✅ Images successfully committed and pushed!"
-          fi
+
+          echo "Failed to push after $RETRIES attempts."
+          exit 1
 
   notify-completion:
     needs: generate-images
