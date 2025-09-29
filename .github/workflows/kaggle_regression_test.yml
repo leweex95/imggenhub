@@ -13,6 +13,11 @@ on:
         options:
         - 'true'
         - 'false'
+      prompt_text:
+        description: 'Prompt for image generation'
+        required: false
+        default: 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road'
+        type: string
 
 jobs:
   kaggle-regression-test:
@@ -37,6 +42,7 @@ jobs:
 
       - name: Setup Kaggle credentials
         env:
+          PROMPT_TEXT: ${{ github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
@@ -51,9 +57,9 @@ jobs:
           echo "Deploying regression test kernel with GPU=$GPU_SETTING..."
           cd src/imggenhub/kaggle
           
-          # Use your CLI but only for deployment (we'll handle monitoring separately)
           python -c "
           import sys
+          import os
           import os
           from pathlib import Path
           sys.path.insert(0, os.path.join('..', '..'))
@@ -61,7 +67,8 @@ jobs:
           from imggenhub.kaggle.utils.prompts import resolve_prompts
           
           cwd = Path('.')
-          prompts_list = resolve_prompts(None, 'Test regression prompt - quick validation', None)
+          prompt_text = os.getenv('PROMPT_TEXT')
+          prompts_list = resolve_prompts(None, prompt_text, None)
           gpu_enabled = os.getenv('GPU_SETTING') == 'true'
           
           print(f'Deploying with GPU={gpu_enabled}')
@@ -71,7 +78,8 @@ jobs:
               kernel_path=cwd / 'config',
               gpu=gpu_enabled
           )
-          print('Deployment completed')
+          kaggle_username = os.getenv("KAGGLE_USERNAME")
+          print(f'Deployment completed. Check progress at https://www.kaggle.com/code/{kaggle_username}/stable-diffusion-batch-generator')
           "
 
       - name: Monitor kernel status (60 seconds)
@@ -141,8 +149,6 @@ jobs:
           print('Monitoring completed.')
           "
 
-
-
       - name: Regression test summary
         if: always()
         run: |
@@ -160,6 +166,8 @@ jobs:
           echo "deployment and monitoring infrastructure."
           echo ""
           echo "The deployed kernel will continue running and complete naturally."
+          echo ""
+          echo "Check the output image at https://www.kaggle.com/code/${{ secrets.KAGGLE_USERNAME }}/stable-diffusion-batch-generator/output"
 
   notify:
     needs: kaggle-regression-test
