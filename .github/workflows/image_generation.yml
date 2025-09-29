@@ -6,6 +6,7 @@ on:
       prompt:
         description: 'Single prompt for image generation'
         required: true
+        default: 'City scene in Budapest with plenty of greenery, micromobility, public terraces, full of life. Highly photorealistic.'
         type: string
       platform:
         description: 'Platform to use for image generation'
