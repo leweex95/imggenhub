@@ -42,17 +42,31 @@ jobs:
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
 
-      - name: Commit and push scraped data
+      - name: Commit and push changes
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
+          # Always sync with remote first
+          git fetch origin master
+          git reset --hard origin/master
+
+          # Stage and commit if there are changes
           git add dist
-          git diff --quiet && git diff --staged --quiet || git commit -m "[Auto-commit] Distribution cleanup [skip ci]"
-          
+          if ! git diff --quiet --cached; then
+            git commit -m "[Auto-commit] Distribution cleanup [skip ci]"
+          fi
+
+          # Push with retries, but fail if never succeeds
           RETRIES=10
           for i in $(seq 1 $RETRIES); do
-            git push https://x-access-token:$PAT_TOKEN@github.com/${{ github.repository }} HEAD:master && break || {
+            if git push https://x-access-token:$PAT_TOKEN@github.com/${{ github.repository }} HEAD:master; then
+              echo "Successfully pushed changes."
+              exit 0
+            else
               echo "Push failed, retrying ($i/$RETRIES)..."
               sleep 3
-            }
+            fi
           done
+
+          echo "Push failed after $RETRIES attempts."
+          exit 1
