@@ -42,7 +42,7 @@ jobs:
 
       - name: Setup Kaggle credentials
         env:
-          PROMPT_TEXT: ${{ github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
+          PROMPT_TEXT: ${{ github.event.inputs.prompt_text != '' && github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
@@ -52,7 +52,7 @@ jobs:
 
       - name: Deploy Kaggle kernel for regression test (deploy only)
         env:
-          GPU_SETTING: ${{ github.event.inputs.enable_gpu || 'false' }}
+          GPU_SETTING: ${{ github.event.inputs.enable_gpu != '' && github.event.inputs.enable_gpu || 'false' }}
         run: |
           echo "Deploying regression test kernel with GPU=$GPU_SETTING..."
           cd src/imggenhub/kaggle
