@@ -47,10 +47,7 @@ permissions:
 
 jobs:
   generate-images:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, imggenhub-runner]
+    runs-on: imggenhub-runner
     permissions:
       contents: write
     steps:

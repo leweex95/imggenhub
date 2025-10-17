@@ -27,10 +27,7 @@ permissions:
 
 jobs:
   kaggle-regression-test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, imggenhub-runner]
+    runs-on: imggenhub-runner
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -153,72 +150,67 @@ jobs:
           "
 
       - name: Monitor kernel status (60 seconds)
+        shell: bash
         run: |
           echo "Monitoring kernel for 60 seconds..."
           cd src/imggenhub/kaggle
-          
-          python -c '
+
+          python - <<'PYCODE'
           import sys
           import os
           from pathlib import Path
-          sys.path.insert(0, os.path.join('..', '..'))
-          from imggenhub.kaggle.utils.poll_status import _get_kaggle_command
           import time
           import subprocess
           import re
-          
-          # Use time-limited monitoring with the same kaggle command approach
+
+          sys.path.insert(0, os.path.join('..', '..'))
+          from imggenhub.kaggle.utils.poll_status import _get_kaggle_command
+
           KERNEL_ID = 'leventecsibi/stable-diffusion-batch-generator'
           MONITOR_DURATION = 60
           POLL_INTERVAL = 10
-          
+
           print(f'Starting monitoring for {MONITOR_DURATION} seconds...')
           start_time = time.time()
           kaggle_cmd = _get_kaggle_command()
-          
+
           while time.time() - start_time < MONITOR_DURATION:
               try:
                   result = subprocess.run(
                       [*kaggle_cmd, 'kernels', 'status', KERNEL_ID],
                       capture_output=True, text=True, check=True
                   )
-                  
-                  # match = re.search(r'has status \"(.*)\"', result.stdout)
-                  match = re.search(r"has status \"(.*)\"", result.stdout)
+                  match = re.search(r'has status "(.*)"', result.stdout)
                   status = match.group(1) if match else 'unknown'
                   elapsed = int(time.time() - start_time)
-                  
                   print(f'[{elapsed}s] Kernel status: {status}')
-                  
-                  # Check if kernel completed or errored
+
                   if status.lower() in ['kernelworkerstatus.complete', 'kernelworkerstatus.error']:
                       print(f'Kernel finished with status: {status}')
                       if status.lower() == 'kernelworkerstatus.error':
                           print('ERROR: Kernel failed - this indicates a regression!')
                           sys.exit(1)
                       break
-                      
-                  # Check if still running and we should continue monitoring
+
                   if status.lower() in ['kernelworkerstatus.running', 'kernelworkerstatus.queued']:
                       remaining = MONITOR_DURATION - elapsed
                       if remaining > 0:
-                          sleep_time = min(POLL_INTERVAL, remaining)
-                          time.sleep(sleep_time)
+                          time.sleep(min(POLL_INTERVAL, remaining))
                       else:
                           print(f'Monitoring period completed. Kernel is still {status}')
                           break
                   else:
                       time.sleep(POLL_INTERVAL)
-                      
+
               except subprocess.CalledProcessError as e:
                   print(f'Error checking status: {e.stderr}')
                   time.sleep(POLL_INTERVAL)
               except Exception as e:
                   print(f'Unexpected error: {e}')
                   time.sleep(POLL_INTERVAL)
-          
+
           print('Monitoring completed.')
-          '
+          PYCODE
 
       - name: Regression test summary
         if: always()
