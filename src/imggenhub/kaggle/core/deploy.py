@@ -57,7 +57,15 @@ def _get_kaggle_command():
         list: Command parts to execute kaggle CLI
     """
     # Check if poetry is available and we're in a poetry project
-    if shutil.which("poetry") and Path("pyproject.toml").exists():
+    def find_pyproject_toml():
+        current = Path.cwd()
+        while current != current.parent:  # Stop at root
+            if (current / "pyproject.toml").exists():
+                return True
+            current = current.parent
+        return False
+    
+    if shutil.which("poetry") and find_pyproject_toml():
         try:
             # Test if poetry can run the kaggle command
             result = subprocess.run(

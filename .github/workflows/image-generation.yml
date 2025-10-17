@@ -50,9 +50,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, imggenhub-runner]
+        os: [ubuntu-latest, imggenhub-runner]
     permissions:
-      contents: write  # Allow pushing to repository
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -97,16 +97,6 @@ jobs:
           poetry install --no-interaction
           poetry run pip install kaggle
 
-      - name: Setup Kaggle credentials (Linux)
-        if: runner.os != 'Windows'
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
-        run: |
-          mkdir -p ~/.kaggle
-          echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
-          chmod 600 ~/.kaggle/kaggle.json
-
       - name: Setup Kaggle credentials (Windows)
         if: runner.os == 'Windows'
         env:
@@ -118,6 +108,16 @@ jobs:
           if (!(Test-Path $kaggleDir)) { New-Item -ItemType Directory -Path $kaggleDir | Out-Null }
           $json = "{""username"":""$env:KAGGLE_USERNAME"",""key"":""$env:KAGGLE_KEY""}"
           Set-Content -Path "$kaggleDir\kaggle.json" -Value $json
+
+      - name: Setup Kaggle credentials (Linux)
+        if: runner.os != 'Windows'
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
 
       - name: Generate images via Kaggle pipeline
         env:
