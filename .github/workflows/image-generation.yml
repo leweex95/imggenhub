@@ -83,7 +83,19 @@ jobs:
         with:
           version: 1.8.2
 
-      - name: Install dependencies
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PATH = "$env:USERPROFILE\AppData\Roaming\Python\Scripts;$env:PATH"
+          poetry install --no-interaction
+          poetry run pip install kaggle
+
+      - name: Install dependencies (Linux)
+        if: runner.os != 'Windows'
+        working-directory: ${{ github.workspace }}
         run: |
           poetry install --no-interaction
           poetry run pip install kaggle
