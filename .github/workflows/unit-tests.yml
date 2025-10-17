@@ -23,23 +23,17 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Poetry (cross-platform)
-        shell: bash
+      - name: Install Poetry (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-              # Download and install Poetry via PowerShell
-              powershell -Command "
-                Invoke-WebRequest -Uri 'https://install.python-poetry.org' -UseBasicParsing -OutFile 'install-poetry.py';
-                py install-poetry.py --version 1.8.2
-              "
-              export PATH="$USERPROFILE\AppData\Roaming\Python\Scripts:$PATH"
-          else
-              # Linux/macOS
-              curl -sSL https://install.python-poetry.org | python3 - --version 1.8.2
-          fi
+          $ErrorActionPreference = "Stop"
+          Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing -OutFile install-poetry.py
+          py install-poetry.py --version 1.8.2
+          $env:PATH = "$env:USERPROFILE\AppData\Roaming\Python\Scripts;$env:PATH"
           poetry --version
 
-      - name: Install Poetry (Ubuntu)
+      - name: Install Poetry (Linux/macOS)
         if: runner.os != 'Windows'
         uses: snok/install-poetry@v1
         with:
