@@ -19,6 +19,12 @@ on:
         default: 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road'
         type: string
 
+permissions:
+  contents: read
+  actions: none
+  checks: write
+  id-token: none
+
 jobs:
   kaggle-regression-test:
     runs-on: ubuntu-latest

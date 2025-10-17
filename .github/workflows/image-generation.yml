@@ -39,6 +39,12 @@ on:
         default: 'output_images'
         type: string
 
+permissions:
+  contents: read
+  actions: none
+  checks: write
+  id-token: none
+
 jobs:
   generate-images:
     runs-on: ubuntu-latest

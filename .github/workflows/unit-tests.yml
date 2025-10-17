@@ -1,0 +1,51 @@
+name: Unit tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request_target:  # for safety: only run on base repo, not forked ones
+    branches: 
+      - master
+
+permissions:
+  contents: read
+  actions: none
+  checks: write
+  id-token: none
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.8.2
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction
+
+      - name: Run unit tests
+        run: |
+          poetry run python -m unittest discover -s tests
+
+      - name: Upload coverage to Codecov
+        if: success()
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+        continue-on-error: true

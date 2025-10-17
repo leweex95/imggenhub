@@ -5,6 +5,12 @@ on:
     tags:
       - '*'
 
+permissions:
+  contents: read
+  actions: none
+  checks: write
+  id-token: none
+
 jobs:
   cleanup-dist:
     runs-on: ubuntu-latest
