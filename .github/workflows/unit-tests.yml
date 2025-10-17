@@ -30,30 +30,42 @@ jobs:
           $ErrorActionPreference = "Stop"
           Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing -OutFile install-poetry.py
           py install-poetry.py --version 1.8.2
+          # Add Poetry to PATH for this session
           $env:PATH = "$env:USERPROFILE\AppData\Roaming\Python\Scripts;$env:PATH"
           poetry --version
 
       - name: Install Poetry (Linux/macOS)
         if: runner.os != 'Windows'
-        uses: snok/install-poetry@v1
-        with:
-          version: 1.8.2
-
-      - name: Install dependencies
+        shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-              export PATH="$USERPROFILE\AppData\Roaming\Python\Scripts:$PATH"
-          fi
+          curl -sSL https://install.python-poetry.org | python3 - --version 1.8.2
+          poetry --version
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:PATH = "$env:USERPROFILE\AppData\Roaming\Python\Scripts;$env:PATH"
           poetry install --no-interaction
-        shell: bash
 
-      - name: Run unit tests
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-              export PATH="$USERPROFILE\AppData\Roaming\Python\Scripts:$PATH"
-          fi
-          poetry run python -m unittest discover -s tests
+      - name: Install dependencies (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
+        run: |
+          poetry install --no-interaction
+
+      - name: Run unit tests (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:PATH = "$env:USERPROFILE\AppData\Roaming\Python\Scripts;$env:PATH"
+          poetry run python -m unittest discover -s tests
+
+      - name: Run unit tests (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          poetry run python -m unittest discover -s tests
 
       - name: Upload coverage to Codecov
         if: success()
