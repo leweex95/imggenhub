@@ -13,10 +13,7 @@ permissions:
 
 jobs:
   cleanup-dist:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, imggenhub-runner]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,8 +25,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Cleanup old dist files (Linux)
-        if: runner.os != 'Windows'
+      - name: Cleanup old dist files
         run: |
           cd dist
           for tag in $(git tag --sort=-creatordate); do
@@ -45,25 +41,6 @@ jobs:
               fi
           done
           cd ..
-
-      - name: Cleanup old dist files (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          Set-Location dist
-          $tags = git tag --sort=-creatordate
-          foreach ($tag in $tags) {
-            $files = Get-ChildItem -Filter "*${tag}*"
-            if ($files.Count -gt 1) {
-              $newest = $files[-1]
-              foreach ($f in $files) {
-                if ($f.Name -ne $newest.Name) {
-                  Remove-Item $f.FullName
-                }
-              }
-            }
-          }
-          Set-Location ..
 
       - name: Configure Git
         run: |

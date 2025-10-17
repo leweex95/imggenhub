@@ -51,6 +51,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           Set-Location "$env:GITHUB_WORKSPACE"
           poetry install --no-interaction
+          poetry run pip install coverage
 
       - name: Install dependencies (Linux/macOS)
         if: runner.os != 'Windows'
@@ -58,19 +59,22 @@ jobs:
         shell: bash
         run: |
           poetry install --no-interaction
+          poetry run pip install coverage
 
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
         shell: powershell
         run: |
           Set-Location "$env:GITHUB_WORKSPACE"
-          poetry run python -m unittest discover -s tests
+          poetry run coverage run -m unittest discover -s tests
+          poetry run coverage xml
 
       - name: Run unit tests (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          poetry run python -m unittest discover -s tests
+          poetry run coverage run -m unittest discover -s tests
+          poetry run coverage xml
 
       - name: Upload coverage to Codecov
         if: success()
