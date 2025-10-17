@@ -31,7 +31,8 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing | py - --version 1.8.2
+          Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing -OutFile install-poetry.py
+          py install-poetry.py --version 1.8.2
 
       - name: Install Poetry (Ubuntu)
         if: runner.os != 'Windows'
