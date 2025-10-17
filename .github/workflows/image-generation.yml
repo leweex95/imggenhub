@@ -47,7 +47,10 @@ permissions:
 
 jobs:
   generate-images:
-    runs-on: imggenhub-runner
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, imggenhub-runner]
     permissions:
       contents: write  # Allow pushing to repository
     steps:
@@ -59,15 +62,34 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install Poetry (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Download installer
+          Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing -OutFile install-poetry.py
+          py install-poetry.py --version 1.8.2
+
+          # Add Poetry to PATH for this session
+          $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+
+          # Verify Poetry
+          poetry --version
+
+      - name: Install Poetry (Ubuntu)
+        if: runner.os != 'Windows'
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.8.2
+
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install poetry
           poetry install --no-interaction
-          # Install kaggle package directly to system Python to ensure CLI availability
-          pip install kaggle
+          poetry run pip install kaggle
 
-      - name: Setup Kaggle credentials
+      - name: Setup Kaggle credentials (Linux)
+        if: runner.os != 'Windows'
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
@@ -75,6 +97,18 @@ jobs:
           mkdir -p ~/.kaggle
           echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Setup Kaggle credentials (Windows)
+        if: runner.os == 'Windows'
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        shell: powershell
+        run: |
+          $kaggleDir = "$env:USERPROFILE\.kaggle"
+          if (!(Test-Path $kaggleDir)) { New-Item -ItemType Directory -Path $kaggleDir | Out-Null }
+          $json = "{""username"":""$env:KAGGLE_USERNAME"",""key"":""$env:KAGGLE_KEY""}"
+          Set-Content -Path "$kaggleDir\kaggle.json" -Value $json
 
       - name: Generate images via Kaggle pipeline
         env:

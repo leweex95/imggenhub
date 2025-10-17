@@ -28,8 +28,15 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+          # Download installer
           Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing -OutFile install-poetry.py
           py install-poetry.py --version 1.8.2
+
+          # Add Poetry to PATH for this session
+          $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+
+          # Verify Poetry
+          poetry --version
 
       - name: Install Poetry (Ubuntu)
         if: runner.os != 'Windows'
