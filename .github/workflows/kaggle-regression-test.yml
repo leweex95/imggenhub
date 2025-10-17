@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   kaggle-regression-test:
-    runs-on: self-hosted
+    runs-on: imggenhub-runner
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

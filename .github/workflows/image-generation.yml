@@ -47,7 +47,7 @@ permissions:
 
 jobs:
   generate-images:
-    runs-on: self-hosted
+    runs-on: imggenhub-runner
     permissions:
       contents: write  # Allow pushing to repository
     steps:
