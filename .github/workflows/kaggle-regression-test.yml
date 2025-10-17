@@ -50,7 +50,7 @@ jobs:
           py install-poetry.py --version 1.8.2
 
           # Add Poetry to PATH for this session
-          $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+          $env:PATH = "$env:USERPROFILE\AppData\Roaming\Python\Scripts;$env:PATH"
 
           # Verify Poetry
           poetry --version

@@ -23,19 +23,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Poetry (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
+      - name: Install Poetry (cross-platform)
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
-          # Download installer
-          Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing -OutFile install-poetry.py
-          py install-poetry.py --version 1.8.2
-
-          # Add Poetry to PATH for this session
-          $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
-
-          # Verify Poetry
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+              # Download and install Poetry via PowerShell
+              powershell -Command "
+                Invoke-WebRequest -Uri 'https://install.python-poetry.org' -UseBasicParsing -OutFile 'install-poetry.py';
+                py install-poetry.py --version 1.8.2
+              "
+              export PATH="$USERPROFILE\AppData\Roaming\Python\Scripts:$PATH"
+          else
+              # Linux/macOS
+              curl -sSL https://install.python-poetry.org | python3 - --version 1.8.2
+          fi
           poetry --version
 
       - name: Install Poetry (Ubuntu)
@@ -46,11 +47,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+              export PATH="$USERPROFILE\AppData\Roaming\Python\Scripts:$PATH"
+          fi
           poetry install --no-interaction
+        shell: bash
 
       - name: Run unit tests
         run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+              export PATH="$USERPROFILE\AppData\Roaming\Python\Scripts:$PATH"
+          fi
           poetry run python -m unittest discover -s tests
+        shell: bash
 
       - name: Upload coverage to Codecov
         if: success()
