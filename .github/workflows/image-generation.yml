@@ -86,10 +86,10 @@ jobs:
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
-        working-directory: ${{ github.workspace }}
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+          Set-Location "$env:GITHUB_WORKSPACE"
           poetry install --no-interaction
           poetry run pip install kaggle
 
