@@ -62,8 +62,15 @@ jobs:
           python -c "
           import sys
           import os
-          import os
           from pathlib import Path
+          
+          # DEBUG: Print all environment variables
+          print('=== DEBUG: All Environment Variables ===')
+          for key, value in sorted(os.environ.items()):
+              if 'KAGGLE' in key or 'PROMPT' in key or 'GPU' in key:
+                  print(f'{key}={value}')
+          print('=== END DEBUG ===')
+          
           sys.path.insert(0, os.path.join('..', '..'))
           from imggenhub.kaggle.core import deploy
           from imggenhub.kaggle.utils.prompts import resolve_prompts
@@ -72,15 +79,20 @@ jobs:
           prompt_text = os.getenv('PROMPT_TEXT')
           prompts_list = resolve_prompts(None, prompt_text, None)
           gpu_enabled = os.getenv('GPU_SETTING') == 'true'
+          kaggle_username = os.getenv('KAGGLE_USERNAME')
           
           print(f'Deploying with GPU={gpu_enabled}')
+          print(f'KAGGLE_USERNAME={kaggle_username}')
+          
+          if not kaggle_username:
+              raise NameError('KAGGLE_USERNAME environment variable is not set!')
+          
           deploy.run(
               prompts_list=prompts_list,
               notebook=cwd / 'config/kaggle-notebook-image-generation.ipynb',
               kernel_path=cwd / 'config',
               gpu=gpu_enabled
           )
-          kaggle_username = os.getenv("KAGGLE_USERNAME")
           print(f'Deployment completed. Check progress at https://www.kaggle.com/code/{kaggle_username}/stable-diffusion-batch-generator')
           "
 
