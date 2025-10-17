@@ -7,7 +7,8 @@ on:
   pull_request_target:  # for safety: only run on base repo, not forked ones
     branches: 
       - master
-
+  workflow_dispatch:
+  
 permissions:
   contents: read
   actions: none
