@@ -47,6 +47,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+          cd $env:GITHUB_WORKSPACE
           $env:PATH = "$env:USERPROFILE\AppData\Roaming\Python\Scripts;$env:PATH"
           poetry install --no-interaction
 
