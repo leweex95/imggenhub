@@ -153,15 +153,11 @@ jobs:
         shell: bash
         run: |
           echo "Monitoring kernel for 60 seconds..."
-          cd src/imggenhub/kaggle
+          cd "${GITHUB_WORKSPACE}/src/imggenhub/kaggle" || exit 1
 
           python - <<'PYCODE'
-          import sys
-          import os
+          import sys, os, time, subprocess, re
           from pathlib import Path
-          import time
-          import subprocess
-          import re
 
           sys.path.insert(0, os.path.join('..', '..'))
           from imggenhub.kaggle.utils.poll_status import _get_kaggle_command
