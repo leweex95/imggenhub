@@ -5,10 +5,15 @@ on:
     tags:
       - '*'
 
+permissions:
+  contents: read
+  actions: none
+  checks: write
+  id-token: none
+
 jobs:
   cleanup-dist:
-    runs-on: ubuntu-latest
-
+    runs-on: imggenhub-runner
     steps:
       - uses: actions/checkout@v3
         with:

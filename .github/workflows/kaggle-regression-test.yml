@@ -19,10 +19,15 @@ on:
         default: 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road'
         type: string
 
+permissions:
+  contents: read
+  actions: none
+  checks: write
+  id-token: none
+
 jobs:
   kaggle-regression-test:
-    runs-on: ubuntu-latest
-    
+    runs-on: imggenhub-runner
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,7 +47,7 @@ jobs:
 
       - name: Setup Kaggle credentials
         env:
-          PROMPT_TEXT: ${{ github.event.inputs.prompt_text != '' && github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
+          PROMPT_TEXT: ${{ github.event.inputs && github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
@@ -52,7 +57,9 @@ jobs:
 
       - name: Deploy Kaggle kernel for regression test (deploy only)
         env:
-          GPU_SETTING: ${{ github.event.inputs.enable_gpu != '' && github.event.inputs.enable_gpu || 'false' }}
+          GPU_SETTING: ${{ github.event.inputs && github.event.inputs.enable_gpu || 'false' }}
+          PROMPT_TEXT: ${{ github.event.inputs && github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
         run: |
           echo "Deploying regression test kernel with GPU=$GPU_SETTING..."
           cd src/imggenhub/kaggle
@@ -60,8 +67,15 @@ jobs:
           python -c "
           import sys
           import os
-          import os
           from pathlib import Path
+          
+          # DEBUG: Print all environment variables
+          print('=== DEBUG: All Environment Variables ===')
+          for key, value in sorted(os.environ.items()):
+              if 'KAGGLE' in key or 'PROMPT' in key or 'GPU' in key:
+                  print(f'{key}={value}')
+          print('=== END DEBUG ===')
+          
           sys.path.insert(0, os.path.join('..', '..'))
           from imggenhub.kaggle.core import deploy
           from imggenhub.kaggle.utils.prompts import resolve_prompts
@@ -70,15 +84,20 @@ jobs:
           prompt_text = os.getenv('PROMPT_TEXT')
           prompts_list = resolve_prompts(None, prompt_text, None)
           gpu_enabled = os.getenv('GPU_SETTING') == 'true'
+          kaggle_username = os.getenv('KAGGLE_USERNAME')
           
           print(f'Deploying with GPU={gpu_enabled}')
+          print(f'KAGGLE_USERNAME={kaggle_username}')
+          
+          if not kaggle_username:
+              raise NameError('KAGGLE_USERNAME environment variable is not set!')
+          
           deploy.run(
               prompts_list=prompts_list,
               notebook=cwd / 'config/kaggle-notebook-image-generation.ipynb',
               kernel_path=cwd / 'config',
               gpu=gpu_enabled
           )
-          kaggle_username = os.getenv("KAGGLE_USERNAME")
           print(f'Deployment completed. Check progress at https://www.kaggle.com/code/{kaggle_username}/stable-diffusion-batch-generator')
           "
 

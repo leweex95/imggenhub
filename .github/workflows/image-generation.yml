@@ -39,12 +39,17 @@ on:
         default: 'output_images'
         type: string
 
+permissions:
+  contents: read
+  actions: none
+  checks: write
+  id-token: none
+
 jobs:
   generate-images:
-    runs-on: ubuntu-latest
+    runs-on: imggenhub-runner
     permissions:
       contents: write  # Allow pushing to repository
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
