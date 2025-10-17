@@ -2,11 +2,7 @@ name: Unit tests
 
 on:
   push:
-    branches:
-      - master
   pull_request_target:  # for safety: only run on base repo, not forked ones
-    branches: 
-      - master
   workflow_dispatch:
   
 permissions:
