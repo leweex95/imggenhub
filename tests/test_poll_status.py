@@ -19,7 +19,8 @@ class TestPollStatus(unittest.TestCase):
 
     @patch('imggenhub.kaggle.utils.poll_status._get_kaggle_command', return_value=['kaggle'])
     @patch('subprocess.run')
-    def test_run_status_unknown(self, mock_subproc, mock_kaggle_cmd):
+    @patch('logging.error')  # Suppress error logging in tests
+    def test_run_status_unknown(self, mock_logging_error, mock_subproc, mock_kaggle_cmd):
         mock_subproc.return_value = MagicMock(returncode=1, stdout='', stderr='error')
         status = poll_status.run(kernel_id='foo/bar', poll_interval=0)
         self.assertEqual(status, 'unknown')

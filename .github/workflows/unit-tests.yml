@@ -2,12 +2,9 @@ name: Unit tests
 
 on:
   push:
-    branches:
-      - master
   pull_request_target:  # for safety: only run on base repo, not forked ones
-    branches: 
-      - master
-
+  workflow_dispatch:
+  
 permissions:
   contents: read
   actions: none
@@ -28,24 +25,57 @@ jobs:
 
       - name: Install Poetry (Windows)
         if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}
+        shell: powershell
+        run: |
+          # Install Poetry using pip (more reliable than the installer script)
+          python -m pip install poetry==2.2.1
+          # Add Poetry to PATH
+          $poetryPath = python -c "import sys; print(sys.executable.replace('python.exe', 'Scripts'))"
+          $env:PATH = "$poetryPath;$env:PATH"
+          # Add to GITHUB_PATH for subsequent steps
+          echo "$poetryPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          poetry --version
+
+      - name: Install Poetry (Linux/macOS)
+        if: runner.os != 'Windows'
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 - --version 2.2.1
+          poetry --version
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing | py - --version 1.8.2
+          Set-Location "$env:GITHUB_WORKSPACE"
+          poetry install --no-interaction
+          poetry run pip install coverage
 
-      - name: Install Poetry (Ubuntu)
+      - name: Install dependencies (Linux/macOS)
         if: runner.os != 'Windows'
-        uses: snok/install-poetry@v1
-        with:
-          version: 1.8.2
-
-      - name: Install dependencies
+        working-directory: ${{ github.workspace }}
+        shell: bash
         run: |
           poetry install --no-interaction
+          poetry run pip install coverage
 
-      - name: Run unit tests
+      - name: Run unit tests (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
         run: |
-          poetry run python -m unittest discover -s tests
+          Set-Location "$env:GITHUB_WORKSPACE"
+          poetry run coverage run -m unittest discover -s tests
+          poetry run coverage xml
+
+      - name: Run unit tests (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          poetry run coverage run -m unittest discover -s tests
+          poetry run coverage xml
 
       - name: Upload coverage to Codecov
         if: success()
