@@ -30,7 +30,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing -OutFile install-poetry.py
-          py install-poetry.py --version 1.8.2
+          py install-poetry.py --version 2.2.1
           # Add Poetry to PATH for all subsequent steps
           "$env:USERPROFILE\AppData\Roaming\Python\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           $env:PATH = "$env:USERPROFILE\AppData\Roaming\Python\Scripts;$env:PATH"
@@ -41,7 +41,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
-          curl -sSL https://install.python-poetry.org | python3 - --version 1.8.2
+          curl -sSL https://install.python-poetry.org | python3 - --version 2.2.1
           poetry --version
 
       - name: Install dependencies (Windows)

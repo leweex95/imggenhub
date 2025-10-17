@@ -1,22 +1,18 @@
-[project]
+[tool.poetry]
 name = "imggenhub"
 version = "1.2.1"
 description = ""
-authors = [
-    {name = "leweex95",email = "csibi.levente14@gmail.com"}
-]
+authors = ["leweex95 <csibi.levente14@gmail.com>"]
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
-dependencies = [
-    "huggingface-hub (>=0.35.1,<0.36.0)",
-    "torch (>=2.8.0,<3.0.0)",
-    "diffusers (>=0.35.1,<0.36.0)",
-    "transformers (>=4.56.2,<5.0.0)",
-    "kaggle (>=1.7.4.5,<2.0.0.0)"
-]
-
-[tool.poetry]
 packages = [{include = "imggenhub", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+huggingface-hub = ">=0.35.1,<0.36.0"
+torch = ">=2.8.0,<3.0.0"
+diffusers = ">=0.35.1,<0.36.0"
+transformers = ">=4.56.2,<5.0.0"
+kaggle = ">=1.7.4.5,<2.0.0.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
