@@ -119,7 +119,8 @@ jobs:
           echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
-      - name: Generate images via Kaggle pipeline
+      - name: Generate images via Kaggle pipeline (Linux)
+        if: runner.os != 'Windows'
         env:
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
@@ -175,7 +176,65 @@ jobs:
           )
           "
 
-      - name: Verify generated images
+      - name: Generate images via Kaggle pipeline (Windows)
+        if: runner.os == 'Windows'
+        env:
+          PROMPT: ${{ github.event.inputs.prompt }}
+          MODEL_NAME: ${{ github.event.inputs.model_name }}
+          GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
+          DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+        run: |
+          echo "Starting image generation with:"
+          echo "Prompt: $env:PROMPT"
+          echo "Model: $env:MODEL_NAME"
+          echo "GPU: $env:GPU_SETTING"
+          echo "Destination: $env:DEST_FOLDER"
+          echo ""
+          
+          cd src/imggenhub/kaggle
+          
+          # Build the command with proper arguments
+          $ARGS = "--prompt `"$env:PROMPT`" --dest ../../../$env:DEST_FOLDER"
+          
+          if ($env:MODEL_NAME -ne "stabilityai/stable-diffusion-xl-base-1.0") {
+            $ARGS += " --model_name `"$env:MODEL_NAME`""
+          }
+          
+          if ($env:GPU_SETTING -eq "true") {
+            $ARGS += " --gpu"
+          }
+          
+          echo "Running: python -m imggenhub.kaggle.main $ARGS"
+          echo ""
+          
+          # Run the full pipeline (deploy -> poll -> download)
+          python -c "
+          import sys
+          import os
+          from pathlib import Path
+          sys.path.insert(0, os.path.join('..', '..'))
+          from imggenhub.kaggle.main import run_pipeline
+          
+          # Convert shell variables to proper Python types
+          gpu_enabled = os.getenv('GPU_SETTING', 'false').lower() == 'true'
+          model_name = os.getenv('MODEL_NAME')
+          if model_name == 'stabilityai/stable-diffusion-xl-base-1.0':
+              model_name = None
+          
+          run_pipeline(
+              prompts_file=None,
+              notebook='config/kaggle-notebook-image-generation.ipynb',
+              kernel_path='config',
+              gpu=gpu_enabled,
+              dest='../../../' + os.getenv('DEST_FOLDER', 'output_images'),
+              model_name=model_name,
+              prompt=os.getenv('PROMPT'),
+              prompts=None
+          )
+          "
+
+      - name: Verify generated images (Linux)
+        if: runner.os != 'Windows'
         env:
           DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
         run: |
@@ -185,24 +244,50 @@ jobs:
             echo "Found $IMAGE_COUNT image(s) in $DEST_FOLDER/"
             
             echo ""
-            echo "📁 Files generated:"
+            echo "Files generated:"
             find "$DEST_FOLDER" -type f -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" | head -10
             
             # Show total size
             TOTAL_SIZE=$(du -sh "$DEST_FOLDER" | cut -f1)
             echo ""
-            echo "💾 Total size: $TOTAL_SIZE"
+            echo "Total size: $TOTAL_SIZE"
           else
             echo "No output directory found!"
             exit 1
           fi
+
+      - name: Verify generated images (Windows)
+        if: runner.os == 'Windows'
+        env:
+          DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+        run: |
+          echo "Generated images summary:"
+          if (Test-Path $env:DEST_FOLDER -PathType Container) {
+            $imageFiles = Get-ChildItem -Path $env:DEST_FOLDER -File -Include *.png,*.jpg,*.jpeg -Recurse
+            $IMAGE_COUNT = $imageFiles.Count
+            echo "Found $IMAGE_COUNT image(s) in $env:DEST_FOLDER/"
+            
+            echo ""
+            echo "Files generated:"
+            $imageFiles | Select-Object -First 10 | ForEach-Object { echo $_.FullName }
+            
+            # Show total size
+            $totalSizeBytes = ($imageFiles | Measure-Object -Property Length -Sum).Sum
+            $totalSizeMB = [math]::Round($totalSizeBytes / 1MB, 2)
+            echo ""
+            echo "Total size: $totalSizeMB MB"
+          } else {
+            echo "No output directory found!"
+            exit 1
+          }
 
       - name: Configure Git
         run: |
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
 
-      - name: Commit and push generated images
+      - name: Commit and push generated images (Linux)
+        if: runner.os != 'Windows'
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
           DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
@@ -256,6 +341,63 @@ jobs:
           echo "Failed to push after $RETRIES attempts."
           exit 1
 
+      - name: Commit and push generated images (Windows)
+        if: runner.os == 'Windows'
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+          PROMPT: ${{ github.event.inputs.prompt }}
+          MODEL_NAME: ${{ github.event.inputs.model_name }}
+          GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
+        run: |
+          # Check if there are any images to commit first
+          if (-not (Test-Path $env:DEST_FOLDER) -or -not (Get-ChildItem -Path $env:DEST_FOLDER -Filter *.png,*.jpg,*.jpeg -Recurse)) {
+            echo "No images found to commit"
+            exit 0
+          }
+        
+          # Always sync with remote first
+          git fetch origin master
+          git reset --hard origin/master
+
+          # Add generated images to git
+          git add "$env:DEST_FOLDER"
+          if (git diff --staged --quiet) {
+            echo "No new changes to commit"
+            exit 0
+          }
+          
+          $COMMIT_MSG = @"
+          [Auto-commit] Added generated images [skip ci]
+
+          Prompt: $env:PROMPT
+          Model: $env:MODEL_NAME
+          GPU: $env:GPU_SETTING
+          Destination: $env:DEST_FOLDER
+          
+          Generated on: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss") UTC
+          Workflow: ${{ github.workflow }}
+          Run: ${{ github.run_number }}
+          "@
+          
+          # Commit once
+          git commit -m "$COMMIT_MSG"
+
+          # Push with retries
+          $RETRIES = 5
+          for ($i = 1; $i -le $RETRIES; $i++) {
+            if (git push "https://x-access-token:$env:PAT_TOKEN@github.com/${{ github.repository }} HEAD:master") {
+              echo "Successfully pushed changes."
+              exit 0
+            } else {
+              echo "Push failed on attempt $i/$RETRIES, retrying..."
+              Start-Sleep -Seconds 2
+            }
+          }
+
+          echo "Failed to push after $RETRIES attempts."
+          exit 1
+
   notify-completion:
     needs: generate-images
     if: always()
@@ -268,10 +410,10 @@ jobs:
           server_port: 587
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "🎨 [ImgGenHub] Image Generation ${{ needs.generate-images.result == 'success' && 'Completed' || 'Failed' }}"
+          subject: "[ImgGenHub] Image Generation ${{ needs.generate-images.result == 'success' && 'Completed' || 'Failed' }}"
           html_body: |
             <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:22px; font-weight:bold; color:${{ needs.generate-images.result == 'success' && 'green' || 'red' }};">
-              🎨 Image Generation ${{ needs.generate-images.result == 'success' && 'Completed Successfully!' || 'Failed!' }}
+              Image Generation ${{ needs.generate-images.result == 'success' && 'Completed Successfully!' || 'Failed!' }}
             </p>
             <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
               <strong>Generation Details:</strong>
