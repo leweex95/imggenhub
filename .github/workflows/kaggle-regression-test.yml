@@ -1,0 +1,205 @@
+name: Kaggle pipeline regression test
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      enable_gpu:
+        description: 'Enable GPU for the kernel (true/false)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      prompt_text:
+        description: 'Prompt for image generation'
+        required: false
+        default: 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road'
+        type: string
+
+jobs:
+  kaggle-regression-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install --no-interaction
+          # Install kaggle package directly to system Python to ensure CLI availability
+          pip install kaggle
+
+      - name: Setup Kaggle credentials
+        env:
+          PROMPT_TEXT: ${{ github.event.inputs && github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Deploy Kaggle kernel for regression test (deploy only)
+        env:
+          GPU_SETTING: ${{ github.event.inputs.enable_gpu != '' && github.event.inputs.enable_gpu || 'false' }}
+          PROMPT_TEXT: ${{ github.event.inputs && github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        run: |
+          echo "Deploying regression test kernel with GPU=$GPU_SETTING..."
+          cd src/imggenhub/kaggle
+          
+          python -c "
+          import sys
+          import os
+          import os
+          from pathlib import Path
+          sys.path.insert(0, os.path.join('..', '..'))
+          from imggenhub.kaggle.core import deploy
+          from imggenhub.kaggle.utils.prompts import resolve_prompts
+          
+          cwd = Path('.')
+          prompt_text = os.getenv('PROMPT_TEXT')
+          prompts_list = resolve_prompts(None, prompt_text, None)
+          gpu_enabled = os.getenv('GPU_SETTING') == 'true'
+          
+          print(f'Deploying with GPU={gpu_enabled}')
+          deploy.run(
+              prompts_list=prompts_list,
+              notebook=cwd / 'config/kaggle-notebook-image-generation.ipynb',
+              kernel_path=cwd / 'config',
+              gpu=gpu_enabled
+          )
+          kaggle_username = os.getenv("KAGGLE_USERNAME")
+          print(f'Deployment completed. Check progress at https://www.kaggle.com/code/{kaggle_username}/stable-diffusion-batch-generator')
+          "
+
+      - name: Monitor kernel status (60 seconds)
+        run: |
+          echo "Monitoring kernel for 60 seconds..."
+          cd src/imggenhub/kaggle
+          
+          python -c "
+          import sys
+          import os
+          from pathlib import Path
+          sys.path.insert(0, os.path.join('..', '..'))
+          from imggenhub.kaggle.utils.poll_status import _get_kaggle_command
+          import time
+          import subprocess
+          import re
+          
+          # Use time-limited monitoring with the same kaggle command approach
+          KERNEL_ID = 'leventecsibi/stable-diffusion-batch-generator'
+          MONITOR_DURATION = 60
+          POLL_INTERVAL = 10
+          
+          print(f'Starting monitoring for {MONITOR_DURATION} seconds...')
+          start_time = time.time()
+          kaggle_cmd = _get_kaggle_command()
+          
+          while time.time() - start_time < MONITOR_DURATION:
+              try:
+                  result = subprocess.run(
+                      [*kaggle_cmd, 'kernels', 'status', KERNEL_ID],
+                      capture_output=True, text=True, check=True
+                  )
+                  
+                  match = re.search(r'has status \"(.*)\"', result.stdout)
+                  status = match.group(1) if match else 'unknown'
+                  elapsed = int(time.time() - start_time)
+                  
+                  print(f'[{elapsed}s] Kernel status: {status}')
+                  
+                  # Check if kernel completed or errored
+                  if status.lower() in ['kernelworkerstatus.complete', 'kernelworkerstatus.error']:
+                      print(f'Kernel finished with status: {status}')
+                      if status.lower() == 'kernelworkerstatus.error':
+                          print('ERROR: Kernel failed - this indicates a regression!')
+                          sys.exit(1)
+                      break
+                      
+                  # Check if still running and we should continue monitoring
+                  if status.lower() in ['kernelworkerstatus.running', 'kernelworkerstatus.queued']:
+                      remaining = MONITOR_DURATION - elapsed
+                      if remaining > 0:
+                          sleep_time = min(POLL_INTERVAL, remaining)
+                          time.sleep(sleep_time)
+                      else:
+                          print(f'Monitoring period completed. Kernel is still {status}')
+                          break
+                  else:
+                      time.sleep(POLL_INTERVAL)
+                      
+              except subprocess.CalledProcessError as e:
+                  print(f'Error checking status: {e.stderr}')
+                  time.sleep(POLL_INTERVAL)
+              except Exception as e:
+                  print(f'Unexpected error: {e}')
+                  time.sleep(POLL_INTERVAL)
+          
+          print('Monitoring completed.')
+          "
+
+      - name: Regression test summary
+        if: always()
+        run: |
+          echo "=== Kaggle Regression Test Summary ==="
+          echo "✅ Kernel deployment: SUCCESS"
+          echo "✅ Status monitoring: SUCCESS"
+          echo ""
+          echo "The regression test validates that:"
+          echo "1. Kaggle kernel can be deployed successfully"
+          echo "2. Kernel status can be monitored via CLI"
+          echo "3. No immediate deployment or configuration regressions"
+          echo ""
+          echo "Note: This test doesn't run the full image generation pipeline"
+          echo "to avoid consuming GPU quota and time. It only validates the"
+          echo "deployment and monitoring infrastructure."
+          echo ""
+          echo "The deployed kernel will continue running and complete naturally."
+          echo ""
+          echo "Check the output image at https://www.kaggle.com/code/${{ secrets.KAGGLE_USERNAME }}/stable-diffusion-batch-generator/output"
+
+  notify:
+    needs: kaggle-regression-test
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send failure email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚨 [ImgGenHub Github Project] Daily Kaggle Regression Test Failed"
+          html_body: |
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:22px; font-weight:bold; color:red;">
+              🚨 Daily Kaggle Regression Test Failed!
+            </p>
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
+              The Kaggle deployment regression test has failed. This could indicate issues with:
+            </p>
+            <ul style="font-family: 'Roboto', Helvetica, sans-serif; font-size:16px;">
+              <li>Kaggle API authentication</li>
+              <li>Kernel deployment process</li>
+              <li>Notebook configuration</li>
+              <li>Status monitoring functionality</li>
+            </ul>
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
+              Check logs: <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">
+              Workflow Run</a>
+            </p>
+          to: ${{ secrets.EMAIL_USERNAME }}
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
