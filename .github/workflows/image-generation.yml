@@ -38,6 +38,11 @@ on:
         required: false
         default: 'output_images'
         type: string
+      branch:
+        description: 'Branch to checkout and push the generated images'
+        required: false
+        default: 'master'
+        type: string
 
 permissions:
   contents: read
@@ -79,6 +84,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
+          ref: ${{ github.event.inputs.branch }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -317,6 +323,7 @@ jobs:
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
+          TARGET_BRANCH: ${{ github.event.inputs.branch }}
         run: |
           # Check if there are any images to commit first
           if [ ! -d "$DEST_FOLDER" ] || [ -z "$(find "$DEST_FOLDER" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" 2>/dev/null)" ]; then
@@ -325,8 +332,8 @@ jobs:
           fi
         
           # Always sync with remote first
-          git fetch origin master
-          git reset --hard origin/master
+          git fetch origin
+          git reset --hard origin/$TARGET_BRANCH
 
           # Add generated images to git
           git add "$DEST_FOLDER"
@@ -335,24 +342,13 @@ jobs:
             exit 0
           fi
           
-          COMMIT_MSG="[Auto-commit] Added generated images [skip ci]
-
-          Prompt: $PROMPT
-          Model: $MODEL_NAME
-          GPU: $GPU_SETTING
-          Destination: $DEST_FOLDER
-          
-          Generated on: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          Workflow: ${{ github.workflow }}
-          Run: ${{ github.run_number }}"
-          
-          # Commit once
-          git commit -m "$COMMIT_MSG"
+          git commit -m "[Auto-commit] Added generated images [skip ci]"
 
           # Push with retries
           RETRIES=5
           for i in $(seq 1 $RETRIES); do
-            if git push https://x-access-token:$PAT_TOKEN@github.com/${{ github.repository }} HEAD:master; then
+            git push origin $TARGET_BRANCH
+            if [ $? -eq 0 ]; then
               echo "Successfully pushed changes."
               exit 0
             else
@@ -372,6 +368,7 @@ jobs:
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
+          TARGET_BRANCH: ${{ github.event.inputs.branch }}
         run: |
           # Check if there are any images to commit first
           if (-not (Test-Path $env:DEST_FOLDER) -or -not (Get-ChildItem -Path $env:DEST_FOLDER -Include *.png,*.jpg,*.jpeg -Recurse -File)) {
@@ -380,8 +377,8 @@ jobs:
           }
         
           # Always sync with remote first
-          git fetch origin master
-          git reset --hard origin/master
+          git fetch origin
+          git reset --hard origin/$env:TARGET_BRANCH
 
           # Add generated images to git
           git add "$env:DEST_FOLDER"
@@ -395,7 +392,8 @@ jobs:
           # Push with retries
           $RETRIES = 5
           for ($i = 1; $i -le $RETRIES; $i++) {
-            if (git push "https://x-access-token:$env:PAT_TOKEN@github.com/${{ github.repository }}" "HEAD:master") {
+            git push origin $env:TARGET_BRANCH
+            if ($LASTEXITCODE -eq 0) {
               echo "Successfully pushed changes."
               exit 0
             } else {
@@ -432,6 +430,7 @@ jobs:
               <li><strong>Model:</strong> ${{ github.event.inputs.model_name }}</li>
               <li><strong>GPU:</strong> ${{ github.event.inputs.enable_gpu }}</li>
               <li><strong>Destination:</strong> ${{ github.event.inputs.dest_folder }}</li>
+              <li><strong>Branch:</strong> ${{ github.event.inputs.branch }}</li>
             </ul>
             <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
               ${{ needs.generate-images.result == 'success' && 'Generated images have been automatically committed to the repository.' || 'Check the workflow logs for error details.' }}
