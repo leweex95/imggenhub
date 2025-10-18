@@ -71,8 +71,8 @@ def run(dest="output_images", kernel_id=None):
     stderr_log.write_text(result.stderr, encoding="utf-8")
 
     # Minimal logging: only numeric info, no Unicode
-    logging.info(f"Download completed with return code {result.returncode}")
-    logging.info(f"Check logs at: {stdout_log}, {stderr_log}")
+    # logging.info(f"Download completed with return code {result.returncode}")
+    # logging.info(f"Check logs at: {stdout_log}, {stderr_log}")
 
     if result.returncode != 0:
         raise RuntimeError(f"Kaggle CLI failed with code {result.returncode}. See log files above.")

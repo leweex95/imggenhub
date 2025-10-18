@@ -148,11 +148,6 @@ jobs:
           echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
-      - name: Set console codepage (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: chcp 65001
-
       - name: Generate images via Kaggle pipeline (Linux)
         if: runner.os != 'Windows'
         env:
