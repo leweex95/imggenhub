@@ -374,14 +374,13 @@ jobs:
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
         run: |
           # Check if there are any images to commit first
-          if (-not (Test-Path $env:DEST_FOLDER) -or -not (Get-ChildItem -Path $env:DEST_FOLDER -Filter *.png,*.jpg,*.jpeg -Recurse)) {
+          if (-not (Test-Path $env:DEST_FOLDER) -or -not (Get-ChildItem -Path $env:DEST_FOLDER -Include *.png,*.jpg,*.jpeg -Recurse -File)) {
             echo "No images found to commit"
             exit 0
           }
         
           # Always sync with remote first
           git fetch origin master
-          git reset --hard origin/master
 
           # Add generated images to git
           git add "$env:DEST_FOLDER"
