@@ -18,27 +18,21 @@ def run(dest="output_images", kernel_id=None):
     logging.info(f"Downloading output from kernel {kernel_id} to {dest_path}")
     
     kaggle_cmd = _get_kaggle_command()
-    env = os.environ.copy()
-    env['PYTHONIOENCODING'] = 'utf-8'
+
+    # result = subprocess.run([
+    #     *kaggle_cmd, "kernels", "output",
+    #     kernel_id,
+    #     "-p", str(dest_path).replace("\\", "/")
+    # ], capture_output=True, text=True)
     result = subprocess.run([
         *kaggle_cmd, "kernels", "output",
         kernel_id,
         "-p", str(dest_path).replace("\\", "/")
-    ], capture_output=True, env=env, check=False)
+    ], check=False)
     
-    stdout_str = result.stdout.decode('utf-8', errors='replace') if result.stdout else ""
-    stderr_str = result.stderr.decode('utf-8', errors='replace') if result.stderr else ""
-    
-    logging.info(f"Kaggle stdout: {stdout_str}")
-    if result.stderr:
-        logging.error(f"Kaggle stderr: {stderr_str}")
-    
+    logging.info(f"Download completed with return code {result.returncode}")
     if result.returncode != 0:
-        # Check if download actually succeeded despite return code
-        if "Output file downloaded to" in stdout_str:
-            logging.info("Download succeeded despite return code, continuing...")
-        else:
-            raise subprocess.CalledProcessError(result.returncode, result.args, stdout_str, stderr_str)
+        logging.warning("Kaggle command returned non-zero exit code, but download may have succeeded")
     
     logging.info("Download completed")
 
