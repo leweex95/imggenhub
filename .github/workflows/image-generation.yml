@@ -389,21 +389,7 @@ jobs:
             exit 0
           }
           
-          $COMMIT_MSG = @"
-          [Auto-commit] Added generated images [skip ci]
-
-          Prompt: $env:PROMPT
-          Model: $env:MODEL_NAME
-          GPU: $env:GPU_SETTING
-          Destination: $env:DEST_FOLDER
-          
-          Generated on: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss") UTC
-          Workflow: ${{ github.workflow }}
-          Run: ${{ github.run_number }}
-          "@
-          
-          # Commit once
-          git commit -m "$COMMIT_MSG"
+          git commit -m "[Auto-commit] Added generated images [skip ci]"
 
           # Push with retries
           $RETRIES = 5
