@@ -103,7 +103,8 @@ jobs:
           echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
-      - name: Deploy Kaggle kernel for regression test (deploy only)
+      - name: Deploy Kaggle kernel for regression test (deploy only) (Linux)
+        if: runner.os != 'Windows'
         env:
           GPU_SETTING: ${{ github.event.inputs && github.event.inputs.enable_gpu || 'false' }}
           PROMPT_TEXT: ${{ github.event.inputs && github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
@@ -149,72 +150,181 @@ jobs:
           print(f'Deployment completed. Check progress at https://www.kaggle.com/code/{kaggle_username}/stable-diffusion-batch-generator')
           "
 
-      - name: Monitor kernel status (60 seconds)
+      - name: Deploy Kaggle kernel for regression test (deploy only) (Windows)
+        if: runner.os == 'Windows'
+        env:
+          GPU_SETTING: ${{ github.event.inputs && github.event.inputs.enable_gpu || 'false' }}
+          PROMPT_TEXT: ${{ github.event.inputs && github.event.inputs.prompt_text || 'highly photorealistic Budapest city scene with greenery and public terraces on the sidewalks and bike lane on the side of the road' }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        shell: powershell
         run: |
-          echo "Monitoring kernel for 60 seconds..."
-          cd src/imggenhub/kaggle
+          echo "Deploying regression test kernel with GPU=$env:GPU_SETTING..."
+          cd "$env:GITHUB_WORKSPACE\src\imggenhub\kaggle"
           
-          python -c '
+          $pythonCode = @"
           import sys
           import os
           from pathlib import Path
-          sys.path.insert(0, os.path.join("..", ".."))
-          from imggenhub.kaggle.utils.poll_status import _get_kaggle_command
-          import time
-          import subprocess
-          import re
           
-          # Use time-limited monitoring with the same kaggle command approach
-          KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
+          # DEBUG: Print all environment variables
+          print('=== DEBUG: All Environment Variables ===')
+          for key, value in sorted(os.environ.items()):
+              if 'KAGGLE' in key or 'PROMPT' in key or 'GPU' in key:
+                  print(f'{key}={value}')
+          print('=== END DEBUG ===')
+          
+          sys.path.insert(0, os.path.join('..', '..'))
+          from imggenhub.kaggle.core import deploy
+          from imggenhub.kaggle.utils.prompts import resolve_prompts
+          
+          cwd = Path('.')
+          prompt_text = os.getenv('PROMPT_TEXT')
+          prompts_list = resolve_prompts(None, prompt_text, None)
+          gpu_enabled = os.getenv('GPU_SETTING') == 'true'
+          kaggle_username = os.getenv('KAGGLE_USERNAME')
+          
+          print(f'Deploying with GPU={gpu_enabled}')
+          print(f'KAGGLE_USERNAME={kaggle_username}')
+          
+          if not kaggle_username:
+              raise NameError('KAGGLE_USERNAME environment variable is not set!')
+          
+          deploy.run(
+              prompts_list=prompts_list,
+              notebook=cwd / 'config/kaggle-notebook-image-generation.ipynb',
+              kernel_path=cwd / 'config',
+              gpu=gpu_enabled
+          )
+          print(f'Deployment completed. Check progress at https://www.kaggle.com/code/{kaggle_username}/stable-diffusion-batch-generator')
+          "@
+          
+          $pythonCode | Out-File -FilePath "deploy_kernel.py" -Encoding UTF8
+          python deploy_kernel.py
+          Remove-Item "deploy_kernel.py"
+
+      - name: Monitor kernel status (60 seconds) (Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "Monitoring kernel for 60 seconds..."
+          cd "${GITHUB_WORKSPACE}/src/imggenhub/kaggle" || exit 1
+
+          python - <<'PYCODE'
+          import sys, os, time, subprocess, re
+          from pathlib import Path
+
+          sys.path.insert(0, os.path.join('..', '..'))
+          from imggenhub.kaggle.utils.poll_status import _get_kaggle_command
+
+          KERNEL_ID = 'leventecsibi/stable-diffusion-batch-generator'
           MONITOR_DURATION = 60
           POLL_INTERVAL = 10
-          
-          print(f"Starting monitoring for {MONITOR_DURATION} seconds...")
+
+          print(f'Starting monitoring for {MONITOR_DURATION} seconds...')
           start_time = time.time()
           kaggle_cmd = _get_kaggle_command()
-          
+
           while time.time() - start_time < MONITOR_DURATION:
               try:
                   result = subprocess.run(
-                      [*kaggle_cmd, "kernels", "status", KERNEL_ID],
+                      [*kaggle_cmd, 'kernels', 'status', KERNEL_ID],
                       capture_output=True, text=True, check=True
                   )
-                  
-                  match = re.search(r"has status \"(.*)\"", result.stdout)
-                  status = match.group(1) if match else "unknown"
+                  match = re.search(r'has status "(.*)"', result.stdout)
+                  status = match.group(1) if match else 'unknown'
                   elapsed = int(time.time() - start_time)
-                  
-                  print(f"[{elapsed}s] Kernel status: {status}")
-                  
-                  # Check if kernel completed or errored
-                  if status.lower() in ["kernelworkerstatus.complete", "kernelworkerstatus.error"]:
-                      print(f"Kernel finished with status: {status}")
-                      if status.lower() == "kernelworkerstatus.error":
-                          print("ERROR: Kernel failed - this indicates a regression!")
+                  print(f'[{elapsed}s] Kernel status: {status}')
+
+                  if status.lower() in ['kernelworkerstatus.complete', 'kernelworkerstatus.error']:
+                      print(f'Kernel finished with status: {status}')
+                      if status.lower() == 'kernelworkerstatus.error':
+                          print('ERROR: Kernel failed - this indicates a regression!')
                           sys.exit(1)
                       break
-                      
-                  # Check if still running and we should continue monitoring
-                  if status.lower() in ["kernelworkerstatus.running", "kernelworkerstatus.queued"]:
+
+                  if status.lower() in ['kernelworkerstatus.running', 'kernelworkerstatus.queued']:
                       remaining = MONITOR_DURATION - elapsed
                       if remaining > 0:
-                          sleep_time = min(POLL_INTERVAL, remaining)
-                          time.sleep(sleep_time)
+                          time.sleep(min(POLL_INTERVAL, remaining))
                       else:
-                          print(f"Monitoring period completed. Kernel is still {status}")
+                          print(f'Monitoring period completed. Kernel is still {status}')
                           break
                   else:
                       time.sleep(POLL_INTERVAL)
-                      
+
               except subprocess.CalledProcessError as e:
-                  print(f"Error checking status: {e.stderr}")
+                  print(f'Error checking status: {e.stderr}')
                   time.sleep(POLL_INTERVAL)
               except Exception as e:
-                  print(f"Unexpected error: {e}")
+                  print(f'Unexpected error: {e}')
                   time.sleep(POLL_INTERVAL)
-          
-          print("Monitoring completed.")
-          '
+
+          print('Monitoring completed.')
+          PYCODE
+
+      - name: Monitor kernel status (60 seconds) (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          echo "Monitoring kernel for 60 seconds..."
+          cd "$env:GITHUB_WORKSPACE\src\imggenhub\kaggle"
+
+          $pythonCode = @"
+          import sys, os, time, subprocess, re
+          from pathlib import Path
+
+          sys.path.insert(0, os.path.join('..', '..'))
+          from imggenhub.kaggle.utils.poll_status import _get_kaggle_command
+
+          KERNEL_ID = 'leventecsibi/stable-diffusion-batch-generator'
+          MONITOR_DURATION = 60
+          POLL_INTERVAL = 10
+
+          print(f'Starting monitoring for {MONITOR_DURATION} seconds...')
+          start_time = time.time()
+          kaggle_cmd = _get_kaggle_command()
+
+          while time.time() - start_time < MONITOR_DURATION:
+              try:
+                  result = subprocess.run(
+                      [*kaggle_cmd, 'kernels', 'status', KERNEL_ID],
+                      capture_output=True, text=True, check=True
+                  )
+                  match = re.search(r'has status "(.*)"', result.stdout)
+                  status = match.group(1) if match else 'unknown'
+                  elapsed = int(time.time() - start_time)
+                  print(f'[{elapsed}s] Kernel status: {status}')
+
+                  if status.lower() in ['kernelworkerstatus.complete', 'kernelworkerstatus.error']:
+                      print(f'Kernel finished with status: {status}')
+                      if status.lower() == 'kernelworkerstatus.error':
+                          print('ERROR: Kernel failed - this indicates a regression!')
+                          sys.exit(1)
+                      break
+
+                  if status.lower() in ['kernelworkerstatus.running', 'kernelworkerstatus.queued']:
+                      remaining = MONITOR_DURATION - elapsed
+                      if remaining > 0:
+                          time.sleep(min(POLL_INTERVAL, remaining))
+                      else:
+                          print(f'Monitoring period completed. Kernel is still {status}')
+                          break
+                  else:
+                      time.sleep(POLL_INTERVAL)
+
+              except subprocess.CalledProcessError as e:
+                  print(f'Error checking status: {e.stderr}')
+                  time.sleep(POLL_INTERVAL)
+              except Exception as e:
+                  print(f'Unexpected error: {e}')
+                  time.sleep(POLL_INTERVAL)
+
+          print('Monitoring completed.')
+          "@
+
+          $pythonCode | Out-File -FilePath "monitor_kernel.py" -Encoding UTF8
+          python monitor_kernel.py
+          Remove-Item "monitor_kernel.py"
 
       - name: Regression test summary
         if: always()
