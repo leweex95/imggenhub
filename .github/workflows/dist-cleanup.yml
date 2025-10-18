@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - '*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,8 +14,31 @@ permissions:
 
 jobs:
   cleanup-dist:
-    runs-on: ubuntu-latest
+    runs-on: imggenhub-runner
     steps:
+      - name: Ensure Bash is available
+        shell: powershell
+        run: |
+          # Check if bash is available
+          try {
+            $bashPath = Get-Command bash -ErrorAction Stop
+            Write-Host "Bash found at: $($bashPath.Source)"
+          } catch {
+            Write-Host "Bash not found. Installing Git for Windows (which includes Bash)..."
+            # Install Git for Windows using Chocolatey (assumes Chocolatey is installed)
+            choco install git -y --params "/GitAndUnixToolsOnPath /WindowsTerminal /NoAutoCrlf"
+            # Refresh PATH
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+            # Verify installation
+            try {
+              $bashPath = Get-Command bash -ErrorAction Stop
+              Write-Host "Bash installed successfully at: $($bashPath.Source)"
+            } catch {
+              Write-Error "Failed to install Bash. Please install Git for Windows manually on the runner."
+              exit 1
+            }
+          }
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -26,6 +50,7 @@ jobs:
           python-version: '3.11'
 
       - name: Cleanup old dist files
+        shell: bash
         run: |
           cd dist
           for tag in $(git tag --sort=-creatordate); do
@@ -48,6 +73,7 @@ jobs:
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
 
       - name: Commit and push changes
+        shell: bash
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |

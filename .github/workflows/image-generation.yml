@@ -38,6 +38,11 @@ on:
         required: false
         default: 'output_images'
         type: string
+      branch:
+        description: 'Branch to checkout and push the generated images'
+        required: false
+        default: 'fix-img-generation-crash'
+        type: string
 
 permissions:
   contents: read
@@ -47,15 +52,39 @@ permissions:
 
 jobs:
   generate-images:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, imggenhub-runner]
+    runs-on: imggenhub-runner
     permissions:
-      contents: write  # Allow pushing to repository
+      contents: write
     steps:
+      - name: Ensure Bash is available
+        shell: powershell
+        run: |
+          # Check if bash is available
+          try {
+            $bashPath = Get-Command bash -ErrorAction Stop
+            Write-Host "Bash found at: $($bashPath.Source)"
+          } catch {
+            Write-Host "Bash not found. Installing Git for Windows (which includes Bash)..."
+            # Install Git for Windows using Chocolatey (assumes Chocolatey is installed)
+            choco install git -y --params "/GitAndUnixToolsOnPath /WindowsTerminal /NoAutoCrlf"
+            # Refresh PATH
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+            # Verify installation
+            try {
+              $bashPath = Get-Command bash -ErrorAction Stop
+              Write-Host "Bash installed successfully at: $($bashPath.Source)"
+            } catch {
+              Write-Error "Failed to install Bash. Please install Git for Windows manually on the runner."
+              exit 1
+            }
+          }
+
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+          ref: ${{ github.event.inputs.branch }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -97,16 +126,6 @@ jobs:
           poetry install --no-interaction
           poetry run pip install kaggle
 
-      - name: Setup Kaggle credentials (Linux)
-        if: runner.os != 'Windows'
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
-        run: |
-          mkdir -p ~/.kaggle
-          echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
-          chmod 600 ~/.kaggle/kaggle.json
-
       - name: Setup Kaggle credentials (Windows)
         if: runner.os == 'Windows'
         env:
@@ -119,7 +138,18 @@ jobs:
           $json = "{""username"":""$env:KAGGLE_USERNAME"",""key"":""$env:KAGGLE_KEY""}"
           Set-Content -Path "$kaggleDir\kaggle.json" -Value $json
 
-      - name: Generate images via Kaggle pipeline
+      - name: Setup Kaggle credentials (Linux)
+        if: runner.os != 'Windows'
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          echo '{"username":"'$KAGGLE_USERNAME'","key":"'$KAGGLE_KEY'"}' > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Generate images via Kaggle pipeline (Linux)
+        if: runner.os != 'Windows'
         env:
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
@@ -175,7 +205,65 @@ jobs:
           )
           "
 
-      - name: Verify generated images
+      - name: Generate images via Kaggle pipeline (Windows)
+        if: runner.os == 'Windows'
+        env:
+          PROMPT: ${{ github.event.inputs.prompt }}
+          MODEL_NAME: ${{ github.event.inputs.model_name }}
+          GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
+          DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+        run: |
+          echo "Starting image generation with:"
+          echo "Prompt: $env:PROMPT"
+          echo "Model: $env:MODEL_NAME"
+          echo "GPU: $env:GPU_SETTING"
+          echo "Destination: $env:DEST_FOLDER"
+          echo ""
+          
+          cd src/imggenhub/kaggle
+          
+          # Build the command with proper arguments
+          $ARGS = "--prompt `"$env:PROMPT`" --dest ../../../$env:DEST_FOLDER"
+          
+          if ($env:MODEL_NAME -ne "stabilityai/stable-diffusion-xl-base-1.0") {
+            $ARGS += " --model_name `"$env:MODEL_NAME`""
+          }
+          
+          if ($env:GPU_SETTING -eq "true") {
+            $ARGS += " --gpu"
+          }
+          
+          echo "Running: python -m imggenhub.kaggle.main $ARGS"
+          echo ""
+          
+          # Run the full pipeline (deploy -> poll -> download)
+          python -c "
+          import sys
+          import os
+          from pathlib import Path
+          sys.path.insert(0, os.path.join('..', '..'))
+          from imggenhub.kaggle.main import run_pipeline
+          
+          # Convert shell variables to proper Python types
+          gpu_enabled = os.getenv('GPU_SETTING', 'false').lower() == 'true'
+          model_name = os.getenv('MODEL_NAME')
+          if model_name == 'stabilityai/stable-diffusion-xl-base-1.0':
+              model_name = None
+          
+          run_pipeline(
+              prompts_file=None,
+              notebook='config/kaggle-notebook-image-generation.ipynb',
+              kernel_path='config',
+              gpu=gpu_enabled,
+              dest='../../../' + os.getenv('DEST_FOLDER', 'output_images'),
+              model_name=model_name,
+              prompt=os.getenv('PROMPT'),
+              prompts=None
+          )
+          "
+
+      - name: Verify generated images (Linux)
+        if: runner.os != 'Windows'
         env:
           DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
         run: |
@@ -185,30 +273,64 @@ jobs:
             echo "Found $IMAGE_COUNT image(s) in $DEST_FOLDER/"
             
             echo ""
-            echo "📁 Files generated:"
+            echo "Files generated:"
             find "$DEST_FOLDER" -type f -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" | head -10
             
             # Show total size
             TOTAL_SIZE=$(du -sh "$DEST_FOLDER" | cut -f1)
             echo ""
-            echo "💾 Total size: $TOTAL_SIZE"
+            echo "Total size: $TOTAL_SIZE"
           else
             echo "No output directory found!"
             exit 1
           fi
+
+      - name: Verify generated images (Windows)
+        if: runner.os == 'Windows'
+        env:
+          DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+        run: |
+          echo "Generated images summary:"
+          if (Test-Path $env:DEST_FOLDER -PathType Container) {
+            $imageFiles = Get-ChildItem -Path $env:DEST_FOLDER -File -Include *.png,*.jpg,*.jpeg -Recurse
+            $IMAGE_COUNT = $imageFiles.Count
+            echo "Found $IMAGE_COUNT image(s) in $env:DEST_FOLDER/"
+            
+            echo ""
+            echo "Files generated:"
+            $imageFiles | Select-Object -First 10 | ForEach-Object { echo $_.FullName }
+            
+            # Show total size
+            $totalSizeBytes = ($imageFiles | Measure-Object -Property Length -Sum).Sum
+            $totalSizeMB = [math]::Round($totalSizeBytes / 1MB, 2)
+            echo ""
+            echo "Total size: $totalSizeMB MB"
+          } else {
+            echo "No output directory found!"
+            exit 1
+          }
+
+      - name: Upload generated images as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-images-${{ github.run_id }}
+          path: ${{ github.event.inputs.dest_folder }}/
+          retention-days: 7
 
       - name: Configure Git
         run: |
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
 
-      - name: Commit and push generated images
+      - name: Commit and push generated images (Linux)
+        if: runner.os != 'Windows'
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
           DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
+          TARGET_BRANCH: ${{ github.event.inputs.branch }}
         run: |
           # Check if there are any images to commit first
           if [ ! -d "$DEST_FOLDER" ] || [ -z "$(find "$DEST_FOLDER" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" 2>/dev/null)" ]; then
@@ -217,8 +339,8 @@ jobs:
           fi
         
           # Always sync with remote first
-          git fetch origin master
-          git reset --hard origin/master
+          git fetch origin
+          git reset --hard origin/$TARGET_BRANCH
 
           # Add generated images to git
           git add "$DEST_FOLDER"
@@ -227,24 +349,13 @@ jobs:
             exit 0
           fi
           
-          COMMIT_MSG="[Auto-commit] Added generated images [skip ci]
-
-          Prompt: $PROMPT
-          Model: $MODEL_NAME
-          GPU: $GPU_SETTING
-          Destination: $DEST_FOLDER
-          
-          Generated on: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          Workflow: ${{ github.workflow }}
-          Run: ${{ github.run_number }}"
-          
-          # Commit once
-          git commit -m "$COMMIT_MSG"
+          git commit -m "[Auto-commit] Added generated images [skip ci]"
 
           # Push with retries
           RETRIES=5
           for i in $(seq 1 $RETRIES); do
-            if git push https://x-access-token:$PAT_TOKEN@github.com/${{ github.repository }} HEAD:master; then
+            git push origin $TARGET_BRANCH
+            if [ $? -eq 0 ]; then
               echo "Successfully pushed changes."
               exit 0
             else
@@ -256,38 +367,85 @@ jobs:
           echo "Failed to push after $RETRIES attempts."
           exit 1
 
-  notify-completion:
+      - name: Commit and push generated images (Windows)
+        if: runner.os == 'Windows'
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+          PROMPT: ${{ github.event.inputs.prompt }}
+          MODEL_NAME: ${{ github.event.inputs.model_name }}
+          GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
+          TARGET_BRANCH: ${{ github.event.inputs.branch }}
+        run: |
+          # Check if there are any images to commit first
+          if (-not (Test-Path $env:DEST_FOLDER) -or -not (Get-ChildItem -Path $env:DEST_FOLDER -Include *.png,*.jpg,*.jpeg -Recurse -File)) {
+            echo "No images found to commit"
+            exit 0
+          }
+        
+          # Always sync with remote first
+          git fetch origin
+          git reset --hard origin/$env:TARGET_BRANCH
+
+          # Add generated images to git
+          git add "$env:DEST_FOLDER"
+          if (git diff --staged --quiet) {
+            echo "No new changes to commit"
+            exit 0
+          }
+          
+          git commit -m "[Auto-commit] Added generated images [skip ci]"
+
+          # Push with retries
+          $RETRIES = 5
+          for ($i = 1; $i -le $RETRIES; $i++) {
+            git push origin $env:TARGET_BRANCH
+            if ($LASTEXITCODE -eq 0) {
+              echo "Successfully pushed changes."
+              exit 0
+            } else {
+              echo "Push failed on attempt $i/$RETRIES, retrying..."
+              Start-Sleep -Seconds 2
+            }
+          }
+
+          echo "Failed to push after $RETRIES attempts."
+          exit 1
+
+  notify:
     needs: generate-images
-    if: always()
-    runs-on: ubuntu-latest
+    if: failure()
+    runs-on: imggenhub-runner
     steps:
-      - name: Send completion email
+      - name: Send failure email
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 587
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "🎨 [ImgGenHub] Image Generation ${{ needs.generate-images.result == 'success' && 'Completed' || 'Failed' }}"
+          subject: "🚨 [ImgGenHub] Image Generation Failed"
           html_body: |
-            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:22px; font-weight:bold; color:${{ needs.generate-images.result == 'success' && 'green' || 'red' }};">
-              🎨 Image Generation ${{ needs.generate-images.result == 'success' && 'Completed Successfully!' || 'Failed!' }}
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:22px; font-weight:bold; color:red;">
+              🚨 Image Generation Failed!
             </p>
             <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
-              <strong>Generation Details:</strong>
+              The image generation workflow failed to complete successfully.
             </p>
-            <ul style="font-family: 'Roboto', Helvetica, sans-serif; font-size:16px;">
-              <li><strong>Prompt:</strong> ${{ github.event.inputs.prompt }}</li>
-              <li><strong>Model:</strong> ${{ github.event.inputs.model_name }}</li>
-              <li><strong>GPU:</strong> ${{ github.event.inputs.enable_gpu }}</li>
-              <li><strong>Destination:</strong> ${{ github.event.inputs.dest_folder }}</li>
-            </ul>
-            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
-              ${{ needs.generate-images.result == 'success' && 'Generated images have been automatically committed to the repository.' || 'Check the workflow logs for error details.' }}
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:16px;">
+              <strong>Generation Details:</strong><br/>
+              <strong>Prompt:</strong> ${{ github.event.inputs.prompt }}<br/>
+              <strong>Model:</strong> ${{ github.event.inputs.model_name }}<br/>
+              <strong>GPU:</strong> ${{ github.event.inputs.enable_gpu }}<br/>
+              <strong>Destination:</strong> ${{ github.event.inputs.dest_folder }}<br/>
+              <strong>Branch:</strong> ${{ github.event.inputs.branch }}
             </p>
             <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
-              View workflow: <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">
-              Workflow Run</a>
+              Check logs: <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">Workflow Run</a>
+            </p>
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
+              <strong>Debug Artifacts:</strong><br/>
+              <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts">All Artifacts</a>
             </p>
           to: ${{ secrets.EMAIL_USERNAME }}
-          from: ImgGenHub <${{ secrets.EMAIL_USERNAME }}>
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>

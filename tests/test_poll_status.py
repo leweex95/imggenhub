@@ -1,27 +1,48 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 from imggenhub.kaggle.utils import poll_status
 
 class TestPollStatus(unittest.TestCase):
     @patch('imggenhub.kaggle.utils.poll_status._get_kaggle_command', return_value=['kaggle'])
-    @patch('subprocess.run')
+    @patch('imggenhub.kaggle.utils.poll_status.subprocess.run')
     def test_run_status_complete(self, mock_subproc, mock_kaggle_cmd):
         mock_subproc.return_value = MagicMock(returncode=0, stdout='has status "kernelworkerstatus.complete"', stderr='')
         status = poll_status.run(kernel_id='foo/bar', poll_interval=0)
         self.assertEqual(status, 'kernelworkerstatus.complete')
 
     @patch('imggenhub.kaggle.utils.poll_status._get_kaggle_command', return_value=['kaggle'])
-    @patch('subprocess.run')
+    @patch('imggenhub.kaggle.utils.poll_status.subprocess.run')
     def test_run_status_error(self, mock_subproc, mock_kaggle_cmd):
         mock_subproc.return_value = MagicMock(returncode=0, stdout='has status "kernelworkerstatus.error"', stderr='')
         status = poll_status.run(kernel_id='foo/bar', poll_interval=0)
         self.assertEqual(status, 'kernelworkerstatus.error')
 
     @patch('imggenhub.kaggle.utils.poll_status._get_kaggle_command', return_value=['kaggle'])
-    @patch('subprocess.run')
-    @patch('logging.error')  # Suppress error logging in tests
+    @patch('imggenhub.kaggle.utils.poll_status.subprocess.run')
+    @patch('imggenhub.kaggle.utils.poll_status.logging.error')  # Suppress error logging in tests
     def test_run_status_unknown(self, mock_logging_error, mock_subproc, mock_kaggle_cmd):
         mock_subproc.return_value = MagicMock(returncode=1, stdout='', stderr='error')
+        status = poll_status.run(kernel_id='foo/bar', poll_interval=0)
+        self.assertEqual(status, 'unknown')
+
+    @patch('imggenhub.kaggle.utils.poll_status._get_kaggle_command', return_value=['kaggle'])
+    @patch('imggenhub.kaggle.utils.poll_status.subprocess.run')
+    @patch('time.sleep')
+    def test_run_polling_multiple_times(self, mock_sleep, mock_subproc, mock_kaggle_cmd):
+        # First call: in progress, second: complete
+        mock_subproc.side_effect = [
+            MagicMock(returncode=0, stdout='has status "kernelworkerstatus.queued"', stderr=''),
+            MagicMock(returncode=0, stdout='has status "kernelworkerstatus.complete"', stderr='')
+        ]
+        status = poll_status.run(kernel_id='foo/bar', poll_interval=1)
+        self.assertEqual(status, 'kernelworkerstatus.complete')
+        self.assertEqual(mock_subproc.call_count, 2)
+        mock_sleep.assert_called_once_with(1)
+
+    @patch('imggenhub.kaggle.utils.poll_status._get_kaggle_command', return_value=['kaggle'])
+    @patch('imggenhub.kaggle.utils.poll_status.subprocess.run')
+    def test_run_regex_no_match(self, mock_subproc, mock_kaggle_cmd):
+        mock_subproc.return_value = MagicMock(returncode=0, stdout='no status here', stderr='')
         status = poll_status.run(kernel_id='foo/bar', poll_interval=0)
         self.assertEqual(status, 'unknown')
 
@@ -31,6 +52,24 @@ class TestPollStatus(unittest.TestCase):
         with patch('subprocess.run', return_value=MagicMock(returncode=0)):
             cmd = poll_status._get_kaggle_command()
             self.assertIn('poetry', cmd[0])
+
+    @patch('shutil.which', return_value=True)
+    @patch('pathlib.Path.exists', return_value=False)
+    def test_get_kaggle_command_fallback_no_pyproject(self, mock_exists, mock_which):
+        cmd = poll_status._get_kaggle_command()
+        self.assertEqual(cmd, ["python", "-m", "kaggle.cli"])
+
+    @patch('shutil.which', return_value=True)
+    @patch('pathlib.Path.exists', return_value=True)
+    @patch('subprocess.run', side_effect=[MagicMock(returncode=1), MagicMock(returncode=0)])  # First fails, second succeeds
+    def test_get_kaggle_command_poetry_fallback_on_error(self, mock_subproc, mock_exists, mock_which):
+        cmd = poll_status._get_kaggle_command()
+        self.assertEqual(cmd, ["python", "-m", "kaggle.cli"])
+
+    @patch('shutil.which', return_value=False)
+    def test_get_kaggle_command_no_poetry(self, mock_which):
+        cmd = poll_status._get_kaggle_command()
+        self.assertEqual(cmd, ["python", "-m", "kaggle.cli"])
 
 if __name__ == '__main__':
     unittest.main()
