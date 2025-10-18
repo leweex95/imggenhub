@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 import logging
 import shutil
+import os
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -17,43 +18,27 @@ def run(dest="output_images", kernel_id=None):
     logging.info(f"Downloading output from kernel {kernel_id} to {dest_path}")
     
     kaggle_cmd = _get_kaggle_command()
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
     result = subprocess.run([
         *kaggle_cmd, "kernels", "output",
         kernel_id,
         "-p", str(dest_path).replace("\\", "/")
-    ], capture_output=True, text=True, encoding='utf-8')
+    ], capture_output=True, env=env, check=False)
     
-    # Log the output safely
-    try:
-        print(f"{result.stdout=}")
-        print(f"{result.stderr=}")
-        if result.stdout:
-            logging.info(f"Kaggle output: {result.stdout}")
-    except UnicodeEncodeError:
-        print(f"{result.stdout=}")
-        print(f"{result.stderr=}")
-        logging.info("Kaggle output: (contains non-ASCII characters)")
-    try:
-        print(f"{result.stdout=}")
-        print(f"{result.stderr=}")
-        if result.stderr:
-            logging.error(f"Kaggle stderr: {result.stderr}")
-    except UnicodeEncodeError:
-        print(f"{result.stdout=}")
-        print(f"{result.stderr=}")
-        logging.error("Kaggle stderr: (contains non-ASCII characters)")
+    stdout_str = result.stdout.decode('utf-8', errors='replace') if result.stdout else ""
+    stderr_str = result.stderr.decode('utf-8', errors='replace') if result.stderr else ""
+    
+    logging.info(f"Kaggle stdout: {stdout_str}")
+    if result.stderr:
+        logging.error(f"Kaggle stderr: {stderr_str}")
     
     if result.returncode != 0:
         # Check if download actually succeeded despite return code
-        if "Output file downloaded to" in result.stdout:
-            print(f"{result.stdout=}")
+        if "Output file downloaded to" in stdout_str:
             logging.info("Download succeeded despite return code, continuing...")
         else:
-            raise subprocess.CalledProcessError(
-                result.returncode, result.args, 
-                result.stdout.encode('utf-8', errors='replace').decode('utf-8') if result.stdout else None,
-                result.stderr.encode('utf-8', errors='replace').decode('utf-8') if result.stderr else None
-)
+            raise subprocess.CalledProcessError(result.returncode, result.args, stdout_str, stderr_str)
     
     logging.info("Download completed")
 
