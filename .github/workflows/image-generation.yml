@@ -412,39 +412,40 @@ jobs:
           echo "Failed to push after $RETRIES attempts."
           exit 1
 
-  notify-completion:
+  notify:
     needs: generate-images
-    if: always()
+    if: failure()
     runs-on: ubuntu-latest
     steps:
-      - name: Send completion email
+      - name: Send failure email
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 587
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "[ImgGenHub] Image Generation ${{ needs.generate-images.result == 'success' && 'Completed' || 'Failed' }}"
+          subject: "🚨 [ImgGenHub] Image Generation Failed"
           html_body: |
-            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:22px; font-weight:bold; color:${{ needs.generate-images.result == 'success' && 'green' || 'red' }};">
-              Image Generation ${{ needs.generate-images.result == 'success' && 'Completed Successfully!' || 'Failed!' }}
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:22px; font-weight:bold; color:red;">
+              🚨 Image Generation Failed!
             </p>
             <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
-              <strong>Generation Details:</strong>
+              The image generation workflow failed to complete successfully.
             </p>
-            <ul style="font-family: 'Roboto', Helvetica, sans-serif; font-size:16px;">
-              <li><strong>Prompt:</strong> ${{ github.event.inputs.prompt }}</li>
-              <li><strong>Model:</strong> ${{ github.event.inputs.model_name }}</li>
-              <li><strong>GPU:</strong> ${{ github.event.inputs.enable_gpu }}</li>
-              <li><strong>Destination:</strong> ${{ github.event.inputs.dest_folder }}</li>
-              <li><strong>Branch:</strong> ${{ github.event.inputs.branch }}</li>
-            </ul>
-            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
-              ${{ needs.generate-images.result == 'success' && 'Generated images have been automatically committed to the repository.' || 'Check the workflow logs for error details.' }}
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:16px;">
+              <strong>Generation Details:</strong><br/>
+              <strong>Prompt:</strong> ${{ github.event.inputs.prompt }}<br/>
+              <strong>Model:</strong> ${{ github.event.inputs.model_name }}<br/>
+              <strong>GPU:</strong> ${{ github.event.inputs.enable_gpu }}<br/>
+              <strong>Destination:</strong> ${{ github.event.inputs.dest_folder }}<br/>
+              <strong>Branch:</strong> ${{ github.event.inputs.branch }}
             </p>
             <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
-              View workflow: <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">
-              Workflow Run</a>
+              Check logs: <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">Workflow Run</a>
+            </p>
+            <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
+              <strong>Debug Artifacts:</strong><br/>
+              <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts">All Artifacts</a>
             </p>
           to: ${{ secrets.EMAIL_USERNAME }}
-          from: ImgGenHub <${{ secrets.EMAIL_USERNAME }}>
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
