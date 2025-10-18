@@ -30,6 +30,10 @@ def run(kernel_id=None, poll_interval=None):
         status = match.group(1) if match else "unknown"
         logging.info("Kernel status: %s", status)
 
+        if status.lower() == "unknown":
+            logging.error("Unable to parse kernel status from output")
+            return "unknown"
+
         if status.lower() in ["kernelworkerstatus.complete", "kernelworkerstatus.error"]:
             logging.info("Kernel finished with status: %s", status)
             return status.lower()
