@@ -415,7 +415,7 @@ jobs:
   notify:
     needs: generate-images
     if: failure()
-    runs-on: ubuntu-latest
+    runs-on: imggenhub-runner
     steps:
       - name: Send failure email
         uses: dawidd6/action-send-mail@v3
