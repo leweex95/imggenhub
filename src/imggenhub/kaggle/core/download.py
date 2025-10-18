@@ -17,11 +17,17 @@ def run(dest="output_images", kernel_id=None):
     logging.info(f"Downloading output from kernel {kernel_id} to {dest_path}")
     
     kaggle_cmd = _get_kaggle_command()
-    subprocess.run([
+    result = subprocess.run([
         *kaggle_cmd, "kernels", "output",
         kernel_id,
         "-p", str(dest_path)
-    ], check=True)
+    ], check=True, capture_output=True, text=True, encoding='utf-8')
+    
+    # Log the output safely
+    if result.stdout:
+        logging.debug(f"Kaggle output: {result.stdout}")
+    if result.stderr:
+        logging.debug(f"Kaggle stderr: {result.stderr}")
     
     logging.info("Download completed")
 

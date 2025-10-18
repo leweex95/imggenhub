@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import shutil
+import logging
 
 
 def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_path=".", gpu=None, model_id=None):
@@ -46,7 +47,14 @@ def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_
 
     # Push via Kaggle CLI - try Poetry first, fallback to direct python
     kaggle_cmd = _get_kaggle_command()
-    subprocess.run([*kaggle_cmd, "kernels", "push", "-p", str(kernel_path)], check=True)
+    result = subprocess.run([*kaggle_cmd, "kernels", "push", "-p", str(kernel_path)], 
+                           check=True, capture_output=True, text=True, encoding='utf-8')
+    
+    # Log output safely
+    if result.stdout:
+        logging.debug(f"Kaggle push output: {result.stdout}")
+    if result.stderr:
+        logging.debug(f"Kaggle push stderr: {result.stderr}")
 
 
 def _get_kaggle_command():

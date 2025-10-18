@@ -20,7 +20,7 @@ def run(kernel_id=None, poll_interval=None):
         kaggle_cmd = _get_kaggle_command()
         result = subprocess.run(
             [*kaggle_cmd, "kernels", "status", kernel_id],
-            capture_output=True, text=True
+            capture_output=True, text=True, encoding='utf-8'
         )
         if result.returncode != 0:
             logging.error("Error fetching status: %s", result.stderr.strip())
