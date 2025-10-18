@@ -23,14 +23,37 @@ def run(dest="output_images", kernel_id=None):
         "-p", str(dest_path).replace("\\", "/")
     ], capture_output=True, text=True, encoding='utf-8')
     
-    # Log the output
-    if result.stdout:
-        logging.info(f"Kaggle output: {result.stdout}")
-    if result.stderr:
-        logging.error(f"Kaggle stderr: {result.stderr}")
+    # Log the output safely
+    try:
+        print(f"{result.stdout=}")
+        print(f"{result.stderr=}")
+        if result.stdout:
+            logging.info(f"Kaggle output: {result.stdout}")
+    except UnicodeEncodeError:
+        print(f"{result.stdout=}")
+        print(f"{result.stderr=}")
+        logging.info("Kaggle output: (contains non-ASCII characters)")
+    try:
+        print(f"{result.stdout=}")
+        print(f"{result.stderr=}")
+        if result.stderr:
+            logging.error(f"Kaggle stderr: {result.stderr}")
+    except UnicodeEncodeError:
+        print(f"{result.stdout=}")
+        print(f"{result.stderr=}")
+        logging.error("Kaggle stderr: (contains non-ASCII characters)")
     
     if result.returncode != 0:
-        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+        # Check if download actually succeeded despite return code
+        if "Output file downloaded to" in result.stdout:
+            print(f"{result.stdout=}")
+            logging.info("Download succeeded despite return code, continuing...")
+        else:
+            raise subprocess.CalledProcessError(
+                result.returncode, result.args, 
+                result.stdout.encode('utf-8', errors='replace').decode('utf-8') if result.stdout else None,
+                result.stderr.encode('utf-8', errors='replace').decode('utf-8') if result.stderr else None
+)
     
     logging.info("Download completed")
 
