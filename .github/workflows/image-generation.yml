@@ -394,7 +394,7 @@ jobs:
           # Push with retries
           $RETRIES = 5
           for ($i = 1; $i -le $RETRIES; $i++) {
-            if (git push "https://x-access-token:$env:PAT_TOKEN@github.com/${{ github.repository }} HEAD:master") {
+            if (git push "https://x-access-token:$env:PAT_TOKEN@github.com/${{ github.repository }}" "HEAD:master") {
               echo "Successfully pushed changes."
               exit 0
             } else {
