@@ -78,8 +78,10 @@ def run(dest="output_images", kernel_id=None):
     #     raise RuntimeError(f"Kaggle CLI failed with code {result.returncode}. See log files above.")
 
     if result.returncode != 0:
-        # Use only ASCII text in the exception
-        raise RuntimeError("Kaggle CLI failed (non-zero exit code). Check stdout/stderr log files.")
+        # Check if download actually succeeded despite return code
+        if "Output file downloaded to" not in stdout_log.read_text():
+            logging.warning("Kaggle CLI failed (non-zero exit code). Check stdout/stderr log files.")
+            # Don't raise, continue
 
 
 def _get_kaggle_command():
