@@ -381,6 +381,7 @@ jobs:
         
           # Always sync with remote first
           git fetch origin master
+          git reset --hard origin/master
 
           # Add generated images to git
           git add "$env:DEST_FOLDER"
