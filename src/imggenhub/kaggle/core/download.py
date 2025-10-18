@@ -24,11 +24,14 @@ def run(dest="output_images", kernel_id=None):
     #     kernel_id,
     #     "-p", str(dest_path).replace("\\", "/")
     # ], capture_output=True, text=True)
-    result = subprocess.run([
-        *kaggle_cmd, "kernels", "output",
-        kernel_id,
-        "-p", str(dest_path).replace("\\", "/")
-    ], check=False)
+    
+    # Force UTF-8 for Windows
+    result = subprocess.run(
+        [*kaggle_cmd, "kernels", "output", kernel_id, "-p", str(dest_path).replace("\\", "/")],
+        check=False,
+        text=True,            # decode stdout/stderr as text
+        encoding="utf-8"      # force UTF-8 decoding
+    )
     
     logging.info(f"Download completed with return code {result.returncode}")
     if result.returncode != 0:
