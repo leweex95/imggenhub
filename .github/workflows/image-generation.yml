@@ -38,11 +38,6 @@ on:
         required: false
         default: 'output_images'
         type: string
-      branch:
-        description: 'Branch to checkout and push the generated images'
-        required: false
-        default: 'fix-img-generation-crash'
-        type: string
 
 permissions:
   contents: read
@@ -84,7 +79,6 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
-          ref: ${{ github.event.inputs.branch }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -155,6 +149,7 @@ jobs:
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
           DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+          TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           echo "Starting image generation with:"
           echo "Prompt: $PROMPT"
@@ -212,6 +207,7 @@ jobs:
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
           DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
+          TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           echo "Starting image generation with:"
           echo "Prompt: $env:PROMPT"
@@ -330,7 +326,7 @@ jobs:
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
-          TARGET_BRANCH: ${{ github.event.inputs.branch }}
+          TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           # Check if there are any images to commit first
           if [ ! -d "$DEST_FOLDER" ] || [ -z "$(find "$DEST_FOLDER" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" 2>/dev/null)" ]; then
@@ -375,7 +371,7 @@ jobs:
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
-          TARGET_BRANCH: ${{ github.event.inputs.branch }}
+          TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           # Check if there are any images to commit first
           if (-not (Test-Path $env:DEST_FOLDER) -or -not (Get-ChildItem -Path $env:DEST_FOLDER -Include *.png,*.jpg,*.jpeg -Recurse -File)) {
@@ -437,8 +433,7 @@ jobs:
               <strong>Prompt:</strong> ${{ github.event.inputs.prompt }}<br/>
               <strong>Model:</strong> ${{ github.event.inputs.model_name }}<br/>
               <strong>GPU:</strong> ${{ github.event.inputs.enable_gpu }}<br/>
-              <strong>Destination:</strong> ${{ github.event.inputs.dest_folder }}<br/>
-              <strong>Branch:</strong> ${{ github.event.inputs.branch }}
+              <strong>Destination:</strong> ${{ github.event.inputs.dest_folder }}
             </p>
             <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
               Check logs: <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">Workflow Run</a>
