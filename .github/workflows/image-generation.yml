@@ -41,7 +41,7 @@ on:
       branch:
         description: 'Branch to checkout and push the generated images'
         required: false
-        default: 'master'
+        default: 'fix-img-generation-crash'
         type: string
 
 permissions:
