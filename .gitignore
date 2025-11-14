@@ -205,5 +205,8 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Debug aids
-poll-workflow.ps1
+# Output files
+output/
+
+# Coding guidelines
+.github/copilot-instructions.md
