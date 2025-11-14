@@ -44,9 +44,16 @@ def run(dest="output_images", kernel_id=None):
 
     if result.returncode != 0:
         # Check if download actually succeeded despite return code
-        if "Output file downloaded to" not in stdout_log.read_text():
+        stdout_content = stdout_log.read_text()
+        # Check if any files were downloaded by looking for common success indicators
+        files_in_dest = list(dest_path.rglob("*"))
+        has_output_files = any(f.is_file() and f.name.endswith(('.png', '.jpg', '.jpeg', '.log')) for f in files_in_dest)
+        
+        if not has_output_files and "Output file downloaded to" not in stdout_content:
             logging.warning("Kaggle CLI failed (non-zero exit code). Check stdout/stderr log files.")
-            # Don't raise, continue
+            # Don't raise, continue (Kaggle CLI sometimes returns non-zero even on success)
+        elif has_output_files:
+            logging.info(f"Downloaded {len([f for f in files_in_dest if f.is_file()])} file(s) successfully despite Kaggle CLI non-zero exit code")
 
 
 def _get_kaggle_command():
