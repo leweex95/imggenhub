@@ -100,19 +100,61 @@ poetry run python -m imggenhub.kaggle.main \
   --dest ./batch_images
 ```
 
+#### **Advanced photorealistic generation (tested & working)**
+```bash
+poetry run python -m imggenhub.kaggle.main \
+  --gpu \
+  --model_name "stabilityai/stable-diffusion-xl-base-1.0" \
+  --prompt "A highly detailed photorealistic portrait of a young woman with long flowing hair, professional studio lighting, sharp focus on eyes, cinematic composition, 8K resolution, masterpiece quality" \
+  --guidance 10.0 \
+  --steps 75 \
+  --precision int8 \
+  --negative_prompt "blurry, low quality, distorted, watermark, duplicate, multiple identical people, clones, repetition, cartoon, anime, painting, drawing, sketch, low resolution, pixelated, noisy, grainy, artifacts, overexposed, underexposed, bad anatomy, deformed, ugly, disfigured, poorly lit, bad composition" \
+  --dest "photorealistic_portrait"
+```
+*Output will be saved to: `output/photorealistic_portrait_YYYYMMDD_HHMMSS/`*
+
+#### **⚠️ SDXL Base + Refiner pipeline (VRAM intensive)**
+> **Warning**: This configuration requires ~30GB VRAM and will **fail on Kaggle** (max 15GB). Use local GPU with sufficient memory.
+
+```bash
+poetry run python -m imggenhub.kaggle.main \
+  --gpu \
+  --model_name "stabilityai/stable-diffusion-xl-base-1.0" \
+  --refiner_model_name "stabilityai/stable-diffusion-xl-refiner-1.0" \
+  --prompt "A highly detailed photorealistic portrait of a young woman with long flowing hair, professional studio lighting, sharp focus on eyes, cinematic composition, 8K resolution, masterpiece quality" \
+  --guidance 10.0 \
+  --steps 75 \
+  --precision fp16 \
+  --negative_prompt "blurry, low quality, distorted, watermark, duplicate, multiple identical people, clones, repetition, cartoon, anime, painting, drawing, sketch, low resolution, pixelated, noisy, grainy, artifacts, overexposed, underexposed, bad anatomy, deformed, ugly, disfigured, poorly lit, bad composition" \
+  --dest "photorealistic_portrait_refined"
+```
+*Output will be saved to: `output/photorealistic_portrait_refined_YYYYMMDD_HHMMSS/`*
+
 #### **Available CLI options**
 ```bash
 poetry run python -m imggenhub.kaggle.main --help
 ```
 
+#### **Output directory structure**
+All generated images and logs are automatically organized in timestamped subfolders under the `output/` directory:
+
+```
+output/
+├── final_working_test_20251114_121500/  # --dest "final_working_test" + timestamp
+│   ├── generated_images/                 # Images from the notebook
+│   ├── kaggle_cli_stdout.log            # Kaggle CLI output logs
+│   ├── kaggle_cli_stderr.log            # Kaggle CLI error logs
+│   └── stable-diffusion-batch-generator.log  # Kernel execution logs (if any)
+└── 20251114_121600/                     # Default timestamp-only naming
+    ├── generated_images/
+    └── ...
+```
+
 **Key parameters:**
-- `--prompt`: Single prompt string
-- `--prompts_file`: JSON file with multiple prompts  
-- `--model_name`: Hugging Face model ID
-- `--gpu`: Enable GPU acceleration
-- `--dest`: Output directory
-- `--notebook`: Custom notebook path
-- `--kernel_path`: Kaggle kernel configuration directory
+- `--dest DEST`: Custom name prefix for the output folder (default: timestamp only)
+- Outputs are always saved under `output/` with automatic timestamping
+- All logs from the generation process are saved in the same folder as the images
 
 ### **☁️ GitHub Actions usage**
 
