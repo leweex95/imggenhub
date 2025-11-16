@@ -8,7 +8,10 @@
   "enable_gpu": "true",
   "enable_internet": "true",
   "dataset_sources": [
-    "leventecsibi/huggingface-token"
+    "sanderland/flux.1-schnell"
+  ],
+  "model_sources": [
+    "sanderland/flux.1-schnell"
   ],
   "metadata": {
     "kernelspec": {

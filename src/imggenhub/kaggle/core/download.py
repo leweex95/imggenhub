@@ -55,6 +55,31 @@ def run(dest="output_images", kernel_id=None):
         elif has_output_files:
             logging.info(f"Downloaded {len([f for f in files_in_dest if f.is_file()])} file(s) successfully despite Kaggle CLI non-zero exit code")
 
+    # Post-process: flatten any nested 'output' folders produced by the kernel
+    # Some kernels save into 'output/<runname>/' which causes download to produce
+    # nested folders like dest/output/<runname>/image.png; move images/logs to dest root.
+    files_to_move = list(dest_path.rglob("**/*"))
+    for f in files_to_move:
+        if f.is_file() and f.parent != dest_path:
+            # Only move images/logs (keep everything else)
+            if f.suffix.lower() in ('.png', '.jpg', '.jpeg', '.log'):
+                target = dest_path / f.name
+                # Avoid collisions: append a counter if necessary
+                counter = 1
+                original_stem = f.stem
+                while target.exists():
+                    target = dest_path / f"{original_stem}_{counter}{f.suffix}"
+                    counter += 1
+                shutil.move(str(f), str(target))
+
+    # Remove empty directories under dest_path created by the download
+    for d in [p for p in dest_path.rglob("*") if p.is_dir()]:
+        try:
+            if not any(d.iterdir()):
+                d.rmdir()
+        except Exception:
+            pass
+
 
 def _get_kaggle_command():
     """
