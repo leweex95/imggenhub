@@ -127,7 +127,7 @@ def auto_detect_precision(model_id: str, hf_token: Optional[str] = None) -> Tupl
 if __name__ == "__main__":
     # Test with FLUX model
     model_id = "black-forest-labs/FLUX.1-schnell"
-    hf_token = "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"  # Your token
+    hf_token = None  # Set your token here or pass via environment variable
 
     print(f"Detecting precision for: {model_id}")
     precision, variant = auto_detect_precision(model_id, hf_token)
