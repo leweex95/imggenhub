@@ -121,22 +121,3 @@ def auto_detect_precision(model_id: str, hf_token: Optional[str] = None) -> Tupl
     """
     detector = AutoPrecisionDetector(hf_token)
     return detector.detect_best_precision(model_id)
-
-
-# Example usage in your pipeline
-if __name__ == "__main__":
-    # Test with FLUX model
-    model_id = "black-forest-labs/FLUX.1-schnell"
-    hf_token = None  # Set your token here or pass via environment variable
-
-    print(f"Detecting precision for: {model_id}")
-    precision, variant = auto_detect_precision(model_id, hf_token)
-
-    print(f"Recommended precision: {precision}")
-    print(f"Variant parameter: {variant}")
-
-    # Show how to use in your code
-    print("\nUse in your pipeline:")
-    print(f"PRECISION = '{precision}'")
-    print(f"variant = {repr(variant)}")
-    print(f"torch_dtype = torch.{precision.replace('fp', 'float').replace('int', 'int')}")
