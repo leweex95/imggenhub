@@ -25,6 +25,12 @@ on:
         - 'runwayml/stable-diffusion-v1-5'
         - 'stabilityai/stable-diffusion-2-1'
         - 'CompVis/stable-diffusion-v1-4'
+        - 'SG161222/Realistic_Vision_V5.1_noVAE'
+      refiner_model_name:
+        description: 'Hugging Face refiner model to use (leave empty for default SDXL refiner)'
+        required: false
+        default: 'stabilityai/stable-diffusion-xl-refiner-1.0'
+        type: string
       enable_gpu:
         description: 'Enable GPU for faster generation'
         required: false
@@ -37,6 +43,39 @@ on:
         description: 'Destination folder for generated images'
         required: false
         default: 'output_images'
+        type: string
+      guidance_scale:
+        description: 'Guidance scale (7-12 recommended for photorealism)'
+        required: false
+        default: '10'
+        type: string
+      inference_steps:
+        description: 'Number of inference steps (50-100 for better quality)'
+        required: false
+        default: '50'
+        type: string
+      use_refiner:
+        description: 'Enable SDXL refiner for enhanced photorealism'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      fp16:
+        description: 'Precision level for model weights and inference'
+        required: false
+        default: 'fp16'
+        type: choice
+        options:
+        - 'fp32'
+        - 'fp16'
+        - 'int8'
+        - 'int4'
+      negative_prompt:
+        description: 'Custom negative prompt for quality control'
+        required: false
+        default: 'blurry, low quality, distorted, watermark, duplicate, multiple identical people, clones, repetition, cartoon, anime, painting, drawing, sketch, low resolution, pixelated, noisy, grainy, artifacts, overexposed, underexposed, bad anatomy, deformed, ugly, disfigured'
         type: string
 
 permissions:
@@ -147,28 +186,55 @@ jobs:
         env:
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
+          REFINER_MODEL_NAME: ${{ github.event.inputs.refiner_model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
           DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
           TARGET_BRANCH: ${{ github.ref_name }}
+          GUIDANCE_SCALE: ${{ github.event.inputs.guidance_scale }}
+          INFERENCE_STEPS: ${{ github.event.inputs.inference_steps }}
+          USE_REFINER: ${{ github.event.inputs.use_refiner }}
+          PRECISION: ${{ github.event.inputs.fp16 }}
+          NEGATIVE_PROMPT: ${{ github.event.inputs.negative_prompt }}
         run: |
           echo "Starting image generation with:"
           echo "Prompt: $PROMPT"
           echo "Model: $MODEL_NAME"
+          echo "Refiner Model: $REFINER_MODEL_NAME"
           echo "GPU: $GPU_SETTING"
           echo "Destination: $DEST_FOLDER"
+          echo "Guidance: $GUIDANCE_SCALE"
+          echo "Steps: $INFERENCE_STEPS"
+          echo "Use Refiner: $USE_REFINER"
+          echo "FP16: $HIGH_QUALITY"
           echo ""
           
           cd src/imggenhub/kaggle
           
           # Build the command with proper arguments
-          ARGS="--prompt \"$PROMPT\" --dest ../../../$DEST_FOLDER"
+          ARGS="--prompt \"$PROMPT\" --dest ../../../$DEST_FOLDER --guidance $GUIDANCE_SCALE --steps $INFERENCE_STEPS"
           
           if [ "$MODEL_NAME" != "stabilityai/stable-diffusion-xl-base-1.0" ]; then
             ARGS="$ARGS --model_name \"$MODEL_NAME\""
           fi
           
+          if [ "$REFINER_MODEL_NAME" != "stabilityai/stable-diffusion-xl-refiner-1.0" ]; then
+            ARGS="$ARGS --refiner_model_name \"$REFINER_MODEL_NAME\""
+          fi
+          
           if [ "$GPU_SETTING" = "true" ]; then
             ARGS="$ARGS --gpu"
+          fi
+          
+          if [ "$USE_REFINER" = "true" ]; then
+            ARGS="$ARGS --use_refiner"
+          fi
+          
+          if [ "$HIGH_QUALITY" = "true" ]; then
+            ARGS="$ARGS --high_quality"
+          fi
+          
+          if [ -n "$NEGATIVE_PROMPT" ]; then
+            ARGS="$ARGS --negative_prompt \"$NEGATIVE_PROMPT\""
           fi
           
           echo "Running: python -m imggenhub.kaggle.main $ARGS"
@@ -187,6 +253,12 @@ jobs:
           model_name = os.getenv('MODEL_NAME')
           if model_name == 'stabilityai/stable-diffusion-xl-base-1.0':
               model_name = None
+          refiner_model_name = os.getenv('REFINER_MODEL_NAME')
+          if refiner_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0':
+              refiner_model_name = None
+          # Automatically enable refiner if refiner model is specified
+          use_refiner = (refiner_model_name is not None)
+          precision = os.getenv('PRECISION', 'fp16')
           
           run_pipeline(
               prompts_file=None,
@@ -195,8 +267,13 @@ jobs:
               gpu=gpu_enabled,
               dest='../../../' + os.getenv('DEST_FOLDER', 'output_images'),
               model_name=model_name,
+              refiner_model_name=refiner_model_name,
               prompt=os.getenv('PROMPT'),
-              prompts=None
+              prompts=None,
+              guidance=float(os.getenv('GUIDANCE_SCALE', '10')),
+              steps=int(os.getenv('INFERENCE_STEPS', '50')),
+              precision=precision,
+              negative_prompt=os.getenv('NEGATIVE_PROMPT')
           )
           "
 
@@ -205,28 +282,55 @@ jobs:
         env:
           PROMPT: ${{ github.event.inputs.prompt }}
           MODEL_NAME: ${{ github.event.inputs.model_name }}
+          REFINER_MODEL_NAME: ${{ github.event.inputs.refiner_model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
           DEST_FOLDER: ${{ github.event.inputs.dest_folder }}
           TARGET_BRANCH: ${{ github.ref_name }}
+          GUIDANCE_SCALE: ${{ github.event.inputs.guidance_scale }}
+          INFERENCE_STEPS: ${{ github.event.inputs.inference_steps }}
+          USE_REFINER: ${{ github.event.inputs.use_refiner }}
+          PRECISION: ${{ github.event.inputs.fp16 }}
+          NEGATIVE_PROMPT: ${{ github.event.inputs.negative_prompt }}
         run: |
           echo "Starting image generation with:"
           echo "Prompt: $env:PROMPT"
           echo "Model: $env:MODEL_NAME"
+          echo "Refiner Model: $env:REFINER_MODEL_NAME"
           echo "GPU: $env:GPU_SETTING"
           echo "Destination: $env:DEST_FOLDER"
+          echo "Guidance: $env:GUIDANCE_SCALE"
+          echo "Steps: $env:INFERENCE_STEPS"
+          echo "Use Refiner: $env:USE_REFINER"
+          echo "High Quality: $env:HIGH_QUALITY"
           echo ""
           
           cd src/imggenhub/kaggle
           
           # Build the command with proper arguments
-          $ARGS = "--prompt `"$env:PROMPT`" --dest ../../../$env:DEST_FOLDER"
+          $ARGS = "--prompt `"$env:PROMPT`" --dest ../../../$env:DEST_FOLDER --guidance $env:GUIDANCE_SCALE --steps $env:INFERENCE_STEPS"
           
           if ($env:MODEL_NAME -ne "stabilityai/stable-diffusion-xl-base-1.0") {
             $ARGS += " --model_name `"$env:MODEL_NAME`""
           }
           
+          if ($env:REFINER_MODEL_NAME -ne "stabilityai/stable-diffusion-xl-refiner-1.0") {
+            $ARGS += " --refiner_model_name `"$env:REFINER_MODEL_NAME`""
+          }
+          
           if ($env:GPU_SETTING -eq "true") {
             $ARGS += " --gpu"
+          }
+          
+          if ($env:USE_REFINER -eq "true") {
+            $ARGS += " --use_refiner"
+          }
+          
+          if ($env:HIGH_QUALITY -eq "true") {
+            $ARGS += " --high_quality"
+          }
+          
+          if ($env:NEGATIVE_PROMPT) {
+            $ARGS += " --negative_prompt `"$env:NEGATIVE_PROMPT`""
           }
           
           echo "Running: python -m imggenhub.kaggle.main $ARGS"
@@ -245,6 +349,12 @@ jobs:
           model_name = os.getenv('MODEL_NAME')
           if model_name == 'stabilityai/stable-diffusion-xl-base-1.0':
               model_name = None
+          refiner_model_name = os.getenv('REFINER_MODEL_NAME')
+          if refiner_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0':
+              refiner_model_name = None
+          # Automatically enable refiner if refiner model is specified
+          use_refiner = (refiner_model_name is not None)
+          precision = os.getenv('PRECISION', 'fp16')
           
           run_pipeline(
               prompts_file=None,
@@ -253,8 +363,13 @@ jobs:
               gpu=gpu_enabled,
               dest='../../../' + os.getenv('DEST_FOLDER', 'output_images'),
               model_name=model_name,
+              refiner_model_name=refiner_model_name,
               prompt=os.getenv('PROMPT'),
-              prompts=None
+              prompts=None,
+              guidance=float(os.getenv('GUIDANCE_SCALE', '10')),
+              steps=int(os.getenv('INFERENCE_STEPS', '50')),
+              precision=precision,
+              negative_prompt=os.getenv('NEGATIVE_PROMPT')
           )
           "
 
@@ -327,6 +442,10 @@ jobs:
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
           TARGET_BRANCH: ${{ github.ref_name }}
+          GUIDANCE_SCALE: ${{ github.event.inputs.guidance_scale }}
+          INFERENCE_STEPS: ${{ github.event.inputs.inference_steps }}
+          USE_REFINER: ${{ github.event.inputs.use_refiner }}
+          PRECISION: ${{ github.event.inputs.fp16 }}
         run: |
           # Check if there are any images to commit first
           if [ ! -d "$DEST_FOLDER" ] || [ -z "$(find "$DEST_FOLDER" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" 2>/dev/null)" ]; then
@@ -372,6 +491,10 @@ jobs:
           MODEL_NAME: ${{ github.event.inputs.model_name }}
           GPU_SETTING: ${{ github.event.inputs.enable_gpu }}
           TARGET_BRANCH: ${{ github.ref_name }}
+          GUIDANCE_SCALE: ${{ github.event.inputs.guidance_scale }}
+          INFERENCE_STEPS: ${{ github.event.inputs.inference_steps }}
+          USE_REFINER: ${{ github.event.inputs.use_refiner }}
+          PRECISION: ${{ github.event.inputs.fp16 }}
         run: |
           # Check if there are any images to commit first
           if (-not (Test-Path $env:DEST_FOLDER) -or -not (Get-ChildItem -Path $env:DEST_FOLDER -Include *.png,*.jpg,*.jpeg -Recurse -File)) {
@@ -432,7 +555,12 @@ jobs:
               <strong>Generation Details:</strong><br/>
               <strong>Prompt:</strong> ${{ github.event.inputs.prompt }}<br/>
               <strong>Model:</strong> ${{ github.event.inputs.model_name }}<br/>
+              <strong>Refiner Model:</strong> ${{ github.event.inputs.refiner_model_name }}<br/>
               <strong>GPU:</strong> ${{ github.event.inputs.enable_gpu }}<br/>
+              <strong>Guidance Scale:</strong> ${{ github.event.inputs.guidance_scale }}<br/>
+              <strong>Inference Steps:</strong> ${{ github.event.inputs.inference_steps }}<br/>
+              <strong>Use Refiner:</strong> ${{ github.event.inputs.use_refiner }}<br/>
+              <strong>Precision:</strong> ${{ github.event.inputs.fp16 }}<br/>
               <strong>Destination:</strong> ${{ github.event.inputs.dest_folder }}
             </p>
             <p style="font-family: 'Roboto', Helvetica, sans-serif; font-size:18px;">
