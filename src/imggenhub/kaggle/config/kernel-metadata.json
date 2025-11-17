@@ -1,18 +1,14 @@
 {
   "id": "leventecsibi/stable-diffusion-batch-generator",
   "title": "Stable Diffusion Batch Generator",
-  "code_file": "kaggle-notebook-image-generation.ipynb",
+  "code_file": "kaggle-notebook-flux-generation.ipynb",
   "language": "python",
   "kernel_type": "notebook",
   "is_private": "true",
   "enable_gpu": "true",
   "enable_internet": "true",
-  "dataset_sources": [
-    "sanderland/flux.1-schnell"
-  ],
-  "model_sources": [
-    "sanderland/flux.1-schnell"
-  ],
+  "dataset_sources": [],
+  "model_sources": [],
   "metadata": {
     "kernelspec": {
       "name": "python3",
