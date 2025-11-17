@@ -82,17 +82,13 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
 
 def main():
     """Main entry point - focused on argument parsing and orchestration"""
-    # Set up output directory and log CLI command early
-    dest_path = setup_output_directory()
-    log_cli_command(dest_path)
-
-    # Parse command line arguments
+    # Parse command line arguments first to get dest
     parser = argparse.ArgumentParser(description="Kaggle image generation pipeline")
     parser.add_argument("--prompts_file", type=str, default="./config/prompts.json")
     parser.add_argument("--notebook", type=str, default="./config/kaggle-notebook-image-generation.ipynb")
     parser.add_argument("--kernel_path", type=str, default="./config")
     parser.add_argument("--gpu", action="store_true", help="Enable GPU for the kernel")
-    parser.add_argument("--dest", type=str, default="output_images")
+    parser.add_argument("--dest", type=str, default=None, help="Output directory base name (default: timestamp only)")
     parser.add_argument("--model_name", type=str, default=None, help="Image generation model to use")
     parser.add_argument("--refiner_model_name", type=str, default=None, help="Refiner model to use")
     parser.add_argument("--prompt", type=str, default=None, help="Single prompt string")
@@ -110,6 +106,14 @@ def main():
     parser.add_argument("--refiner_negative_prompt", type=str, default=None, help="Custom negative prompt for refiner (defaults to same as --negative_prompt)")
     parser.add_argument("--hf_token", type=str, default=None, help="HuggingFace API token for accessing gated models (e.g., FLUX.1-schnell)")
 
+    # Parse known args first to get dest for output directory setup
+    args, remaining = parser.parse_known_args()
+    
+    # Set up output directory using dest argument
+    dest_path = setup_output_directory(args.dest)
+    log_cli_command(dest_path)
+
+    # Re-parse all arguments now that we have dest_path
     args = parser.parse_args()
 
     # Auto-detect precision if requested

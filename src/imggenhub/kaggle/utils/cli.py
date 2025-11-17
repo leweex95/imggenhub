@@ -14,16 +14,24 @@ def reconstruct_command() -> str:
         str: The full copy-pasteable poetry command
     """
     # Always reconstruct as poetry command for consistency
-    args_part = " ".join(sys.argv[1:])
+    args_parts = []
+    for arg in sys.argv[1:]:
+        # Quote arguments that contain spaces
+        if ' ' in arg:
+            args_parts.append(f'"{arg}"')
+        else:
+            args_parts.append(arg)
+    
+    args_part = " ".join(args_parts)
     return f"poetry run python -m imggenhub.kaggle.main {args_part}"
 
 
-def setup_output_directory(base_name: str = "output_images") -> Path:
+def setup_output_directory(base_name: str = None) -> Path:
     """
     Create a timestamp-based output directory for the current run.
 
     Args:
-        base_name: Base name for the output directory (default: "output_images")
+        base_name: Base name for the output directory. If None, uses just timestamp.
 
     Returns:
         Path: Path to the created output directory
@@ -32,7 +40,11 @@ def setup_output_directory(base_name: str = "output_images") -> Path:
     output_base = Path("output")
     output_base.mkdir(exist_ok=True)
 
-    run_name = f"{base_name}_{timestamp}"
+    if base_name:
+        run_name = f"{base_name}_{timestamp}"
+    else:
+        run_name = timestamp
+    
     dest_path = output_base / run_name
     dest_path.mkdir(parents=True, exist_ok=True)
 
