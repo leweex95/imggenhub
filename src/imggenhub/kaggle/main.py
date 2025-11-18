@@ -41,11 +41,11 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     # Pass only the run name (e.g., '20251115_182905') so the notebook can
     # prepend 'output/' itself and avoid creating nested output paths.
     deploy.run(
-        prompts_list,
-        notebook,
-        kernel_path,
-        gpu,
+        prompts_list=prompts_list,
+        notebook=notebook,
         model_id=model_name,
+        kernel_path=kernel_path,
+        gpu=gpu,
         refiner_model_id=refiner_model_name,
         guidance=guidance,
         steps=steps,

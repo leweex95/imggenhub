@@ -7,22 +7,11 @@ import shutil
 import logging
 
 
-def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_path=".", gpu=None, model_id=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None):
+def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None):
     """
     Deploy Kaggle notebook kernel, optionally overriding prompts and model.
-    Automatically selects the correct notebook based on model type.
+    Uses the specified notebook; user is responsible for matching notebook to model.
     """
-    
-    # Auto-select notebook based on model_id
-    if model_id:
-        # Use FLUX notebook for Kaggle FLUX models
-        if "flux" in model_id.lower():
-            notebook = "kaggle-notebook-flux-generation.ipynb"
-            logging.info(f"Selected FLUX notebook for model: {model_id}")
-        # Use standard notebook for Stability AI and HuggingFace models
-        elif any(org in model_id.lower() for org in ["stabilityai", "black-forest-labs", "runwayml"]):
-            notebook = "kaggle-notebook-image-generation.ipynb"
-            logging.info(f"Selected standard notebook for model: {model_id}")
     
     # Resolve notebook path relative to kernel_path
     nb_path = Path(kernel_path) / notebook
@@ -35,7 +24,7 @@ def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_
 
     # Update parameters in notebook
     # Skip parameter updates for FLUX notebook to avoid breaking JSON indentation
-    if "flux" not in notebook.lower():
+    if "flux" not in str(notebook).lower():
         for cell in nb["cells"]:
             if cell["cell_type"] == "code":
                 # Update PROMPTS
@@ -136,14 +125,37 @@ def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_
         logging.info(f"Skipping parameter updates for FLUX notebook to prevent indentation issues")
 
     # Save updated notebook (only if we modified it)
-    if "flux" not in notebook.lower():
+    if "flux" not in str(notebook).lower():
         with open(nb_path, "w", encoding="utf-8") as f:
             json.dump(nb, f, indent=2)
 
     # Update kernel metadata
     metadata_path = Path(kernel_path) / "kernel-metadata.json"
-    with open(metadata_path, "r", encoding="utf-8") as f:
-        kernel_meta = json.load(f)
+    try:
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            kernel_meta = json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        # Create default metadata if file is corrupted or missing
+        kernel_meta = {
+            "id": "leventecsibi/stable-diffusion-batch-generator",
+            "title": "Stable Diffusion Batch Generator",
+            "code_file": "",
+            "language": "python",
+            "kernel_type": "notebook",
+            "is_private": "true",
+            "enable_gpu": "true",
+            "enable_internet": "true",
+            "dataset_sources": [],
+            "model_sources": [],
+            "metadata": {
+                "kernelspec": {
+                    "name": "python3",
+                    "display_name": "Python 3",
+                    "language": "python"
+                }
+            }
+        }
+        logging.warning(f"Kernel metadata file corrupted or missing, using defaults: {metadata_path}")
     
     # Store original code_file for verification
     original_code_file = kernel_meta.get("code_file", "UNKNOWN")
@@ -151,7 +163,7 @@ def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_
     if gpu is not None:
         kernel_meta["enable_gpu"] = str(gpu).lower()
     # Update code_file to point to the correct notebook
-    kernel_meta["code_file"] = notebook
+    kernel_meta["code_file"] = notebook.name
     logging.info(f"Updated kernel metadata to use notebook: {notebook}")
     
     with open(metadata_path, "w", encoding="utf-8") as f:
@@ -161,15 +173,15 @@ def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_
     with open(metadata_path, "r", encoding="utf-8") as f:
         verify_meta = json.load(f)
     
-    if verify_meta.get("code_file") != notebook:
+    if verify_meta.get("code_file") != notebook.name:
         raise RuntimeError(
             f"ERROR: Metadata update verification failed!\n"
-            f"  Expected code_file: {notebook}\n"
+            f"  Expected code_file: {notebook.name}\n"
             f"  Got code_file: {verify_meta.get('code_file')}\n"
             f"  Metadata file: {metadata_path}"
         )
     
-    logging.info(f"✓ VERIFIED: Metadata correctly updated from '{original_code_file}' to '{notebook}'")
+    logging.info(f"✓ VERIFIED: Metadata correctly updated from '{original_code_file}' to '{notebook.name}'")
     
     # Push via Kaggle CLI - try Poetry first, fallback to direct python
     kaggle_cmd = _get_kaggle_command()
@@ -206,7 +218,8 @@ def _get_kaggle_command():
             result = subprocess.run(
                 ["poetry", "run", "python", "-c", "import kaggle"],
                 capture_output=True,
-                check=False
+                check=False,
+                timeout=10
             )
             if result.returncode == 0:
                 return ["poetry", "run", "python", "-m", "kaggle.cli"]
