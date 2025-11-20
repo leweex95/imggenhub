@@ -8,12 +8,12 @@ from imggenhub.kaggle.utils import poll_status
 from imggenhub.kaggle.utils.prompts import resolve_prompts
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
-from imggenhub.kaggle.utils.auto_precision import AutoPrecisionDetector
+from imggenhub.kaggle.utils.precision_availability import PrecisionAvailabilityChecker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_name=None, refiner_model_name=None, prompt=None, prompts=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None):
+def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_name=None, refiner_model_name=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None):
     """Run Kaggle image generation pipeline: deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
     cwd = Path(__file__).parent
@@ -52,7 +52,6 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         precision=precision,
         negative_prompt=negative_prompt,
         output_dir=dest_path.name,
-        two_stage_refiner=two_stage_refiner,
         refiner_guidance=refiner_guidance,
         refiner_steps=refiner_steps,
         refiner_precision=refiner_precision,
@@ -95,14 +94,13 @@ def main():
     parser.add_argument("--prompts", type=str, nargs="+", default=None, help="Multiple prompts")
     parser.add_argument("--guidance", type=float, required=True, help="Guidance scale (7-12 recommended for photorealism)")
     parser.add_argument("--steps", type=int, required=True, help="Number of inference steps (50-100 for better quality)")
-    parser.add_argument("--precision", type=str, choices=["fp32", "fp16", "int8", "int4", "auto"],
-                        default="auto", help="Precision level: fp32 (highest quality), fp16 (balanced), int8 (faster), int4 (fastest), auto (detect optimal)")
+    parser.add_argument("--precision", type=str, choices=["fp32", "fp16", "int8", "int4"],
+                        default=None, help="Precision level: fp32 (highest quality), fp16 (balanced), int8 (faster), int4 (fastest)")
     parser.add_argument("--negative_prompt", type=str, default=None, help="Custom negative prompt for better quality control")
-    parser.add_argument("--two_stage_refiner", action="store_true", help="Use two-stage approach: base model → unload VRAM → refiner model (saves VRAM)")
     parser.add_argument("--refiner_guidance", type=float, default=None, help="Guidance scale for refiner (REQUIRED when using --refiner_model_name)")
     parser.add_argument("--refiner_steps", type=int, default=None, help="Number of inference steps for refiner (REQUIRED when using --refiner_model_name)")
     parser.add_argument("--refiner_precision", type=str, default=None, choices=["fp32", "fp16", "int8", "int4"],
-                        help="Precision level for refiner (defaults to same as --precision)")
+                        help="Precision level for refiner (REQUIRED when using --refiner_model_name)")
     parser.add_argument("--refiner_negative_prompt", type=str, default=None, help="Custom negative prompt for refiner (defaults to same as --negative_prompt)")
     parser.add_argument("--hf_token", type=str, default=None, help="HuggingFace API token for accessing gated models (e.g., FLUX.1-schnell)")
 
@@ -116,20 +114,10 @@ def main():
     # Re-parse all arguments now that we have dest_path
     args = parser.parse_args()
 
-    # Auto-detect precision if requested
-    if args.precision == "auto":
-        if not args.model_name:
-            print("Error: --model_name is required when using --precision auto")
-            return
-        if _is_kaggle_model(args.model_name):
-            # For Kaggle models, use fp16 as default (most common for FLUX)
-            args.precision = "fp16"
-            print(f"Using default precision 'fp16' for Kaggle model: {args.model_name}")
-        else:
-            print(f"Auto-detecting optimal precision for {args.model_name}...")
-            detected_precision, _ = auto_detect_precision(args.model_name, args.hf_token)
-            args.precision = detected_precision
-            print(f"Detected optimal precision: {args.precision}")
+    # Warn if GPU is not enabled
+    if not args.gpu:
+        print("\033[91m\033[1mWARNING: --gpu flag not provided! This will run on CPU and may take several hours to complete.\033[0m")
+        print("\033[93mConsider adding --gpu to enable GPU acceleration on Kaggle.\033[0m")
 
     # Validate arguments including precision availability
     try:
@@ -151,7 +139,6 @@ def main():
         steps=args.steps,
         precision=args.precision,
         negative_prompt=args.negative_prompt,
-        two_stage_refiner=args.two_stage_refiner,
         refiner_guidance=args.refiner_guidance,
         refiner_steps=args.refiner_steps,
         refiner_precision=args.refiner_precision,
@@ -171,59 +158,82 @@ def _validate_args(args):
     if args.guidance is None:
         raise ValueError("--guidance is required")
     if args.precision is None:
-        raise ValueError("--precision is required")
+        raise ValueError("--precision is required (no auto-detection or defaults allowed)")
+    if args.precision not in ["fp32", "fp16", "int8", "int4"]:
+        raise ValueError(f"--precision must be one of: fp32, fp16, int8, int4. Got: {args.precision}")
+
+    # Validate parameter types and ranges
+    if not isinstance(args.steps, int) or args.steps <= 0:
+        raise ValueError(f"--steps must be a positive integer. Got: {args.steps}")
+    if not isinstance(args.guidance, (int, float)) or args.guidance <= 0:
+        raise ValueError(f"--guidance must be a positive number. Got: {args.guidance}")
 
     # Validate model name is provided
     if not args.model_name:
         raise ValueError("--model_name is required")
+    if not isinstance(args.model_name, str) or not args.model_name.strip():
+        raise ValueError("--model_name must be a non-empty string")
+
+    # Validate prompts
+    if not args.prompt and not args.prompts and not args.prompts_file:
+        raise ValueError("No prompts provided: specify --prompt, --prompts, or --prompts_file")
+    if args.prompt and not isinstance(args.prompt, str):
+        raise ValueError("--prompt must be a string")
+    if args.prompts and not isinstance(args.prompts, list):
+        raise ValueError("--prompts must be a list of strings")
+    if args.prompts_file and not isinstance(args.prompts_file, str):
+        raise ValueError("--prompts_file must be a string")
+
+    # Validate refiner parameters if using refiner
+    if args.refiner_model_name:
+        if not isinstance(args.refiner_model_name, str) or not args.refiner_model_name.strip():
+            raise ValueError("--refiner_model_name must be a non-empty string")
+        if args.refiner_guidance is None:
+            raise ValueError("--refiner_guidance is required when using a refiner model")
+        if args.refiner_steps is None:
+            raise ValueError("--refiner_steps is required when using a refiner model")
+        if not isinstance(args.refiner_guidance, (int, float)) or args.refiner_guidance <= 0:
+            raise ValueError(f"--refiner_guidance must be a positive number. Got: {args.refiner_guidance}")
+        if not isinstance(args.refiner_steps, int) or args.refiner_steps <= 0:
+            raise ValueError(f"--refiner_steps must be a positive integer. Got: {args.refiner_steps}")
+        if args.refiner_precision is None:
+            raise ValueError("--refiner_precision is required when using a refiner model")
+        if args.refiner_precision not in ["fp32", "fp16", "int8", "int4"]:
+            raise ValueError(f"--refiner_precision must be one of: fp32, fp16, int8, int4. Got: {args.refiner_precision}")
 
     # Validate precision availability for base model
-    if args.precision != "auto":  # Skip if auto-detected (already validated)
-        # Skip validation for Kaggle models (not on HuggingFace)
-        if _is_kaggle_model(args.model_name):
-            print(f"Skipping precision validation for Kaggle model: {args.model_name}")
-        else:
-            print(f"Validating precision '{args.precision}' availability for {args.model_name}...")
-            detector = AutoPrecisionDetector(args.hf_token)
-            try:
-                available_variants = detector.detect_available_variants(args.model_name)
-                if args.precision not in available_variants:
-                    available_str = ", ".join(available_variants) if available_variants else "none"
-                    raise ValueError(f"Precision '{args.precision}' not available for model '{args.model_name}'. Available: {available_str}")
-                print(f"[OK] Precision '{args.precision}' is available")
-            except Exception as e:
-                raise ValueError(f"Failed to validate precision for model '{args.model_name}': {e}")
+    # Skip validation for Kaggle models (not on HuggingFace)
+    if _is_kaggle_model(args.model_name):
+        print(f"Skipping precision validation for Kaggle model: {args.model_name}")
+    else:
+        print(f"Validating precision '{args.precision}' availability for {args.model_name}...")
+        detector = PrecisionAvailabilityChecker(args.hf_token)
+        try:
+            available_variants = detector.get_available_precisions(args.model_name)
+            if args.precision not in available_variants:
+                available_str = ", ".join(available_variants) if available_variants else "none"
+                raise ValueError(f"Precision '{args.precision}' not available for model '{args.model_name}'. Available: {available_str}")
+            print(f"[OK] Precision '{args.precision}' is available")
+        except Exception as e:
+            raise ValueError(f"Failed to validate precision for model '{args.model_name}': {e}")
 
-    # Validate refiner precision if using refiner
-    if use_refiner and args.refiner_precision:
-        if not args.refiner_model_name:
-            raise ValueError("--refiner_model_name is required when specifying --refiner_precision")
+    # Validate refiner precision availability if using refiner
+    if use_refiner:
         refiner_model = args.refiner_model_name
         # Skip validation for Kaggle models (not on HuggingFace)
         if _is_kaggle_model(refiner_model):
             print(f"Skipping refiner precision validation for Kaggle model: {refiner_model}")
         else:
             print(f"Validating refiner precision '{args.refiner_precision}' availability for {refiner_model}...")
-            detector = AutoPrecisionDetector(args.hf_token)
+            detector = PrecisionAvailabilityChecker(args.hf_token)
             try:
-                available_variants = detector.detect_available_variants(refiner_model)
+                available_variants = detector.get_available_precisions(refiner_model)
                 if args.refiner_precision not in available_variants:
                     available_str = ", ".join(available_variants) if available_variants else "none"
                     raise ValueError(f"Refiner precision '{args.refiner_precision}' not available for model '{refiner_model}'. Available: {available_str}")
                 print(f"[OK] Refiner precision '{args.refiner_precision}' is available")
             except Exception as e:
                 raise ValueError(f"Failed to validate refiner precision for model '{refiner_model}': {e}")
-
-    # Validate refiner parameters if using refiner
-    if use_refiner:
-        if args.refiner_guidance is None:
-            raise ValueError("--refiner_guidance is required when using a refiner model")
-        if args.refiner_steps is None:
-            raise ValueError("--refiner_steps is required when using a refiner model")
-
-    # Validate prompts
-    if not args.prompt and not args.prompts and not args.prompts_file:
-        raise ValueError("No prompts provided: specify --prompt, --prompts, or --prompts_file")
 
 
 def _is_kaggle_model(model_id: str) -> bool:

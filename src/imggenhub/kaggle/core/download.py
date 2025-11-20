@@ -22,14 +22,21 @@ def run(dest="output_images", kernel_id=None):
     stdout_log = dest_path / "kaggle_cli_stdout.log"
     stderr_log = dest_path / "kaggle_cli_stderr.log"
 
-    # Run Kaggle CLI safely
-    result = subprocess.run(
-        [*kaggle_cmd, "kernels", "output", kernel_id, "-p", str(dest_path).replace("\\", "/")],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8"
-    )
+    # Change to destination directory to ensure Kaggle CLI downloads there
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(str(dest_path))
+
+        # Run Kaggle CLI safely
+        result = subprocess.run(
+            [*kaggle_cmd, "kernels", "output", kernel_id],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8"
+        )
+    finally:
+        os.chdir(original_cwd)
 
     # Write all outputs to files only — no console/logging formatting
     stdout_log.write_text(result.stdout, encoding="utf-8")

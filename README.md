@@ -6,6 +6,8 @@
 
 ImgGenHub is a personal image generation hub that connects to web-based image generation services, currently featuring a fully automated Kaggle-based pipeline with plans for multi-platform support.
 
+In the future, Google Colab and paid Vast.ai GPU support will also be implemented.
+
 ---
 
 ## Features
@@ -15,7 +17,8 @@ ImgGenHub is a personal image generation hub that connects to web-based image ge
 #### **Kaggle-powered image generation**
 - **Automated pipeline**: Deploy → Monitor → Download workflow
 - **GPU/CPU support**: Configurable hardware acceleration via Kaggle's free T4×2 GPUs (30 hours/week)
-- **Multiple models**: Support for popular Stable Diffusion variants
+- **Multiple models**: Support for popular Stable Diffusion variants including SDXL with refiner
+- **Batch processing**: Multiple prompts in a single execution
 - **Flexible prompting**: Command-line prompts or JSON file batch processing
 
 #### **GitHub Actions automation**
@@ -25,63 +28,47 @@ ImgGenHub is a personal image generation hub that connects to web-based image ge
 
 ---
 
-## Requirements
-
-- **Python**: 3.11 or higher
-- **Poetry**: For dependency management  
-- **Kaggle Account**: With API credentials configured
-- **Git**: For repository management
-
----
-
 ## Usage
 
 ### **Local usage**
 
 #### **Simple single prompt**
 ```bash
-poetry run python -m imggenhub.kaggle.main \
+python src/imggenhub/kaggle/main.py \
   --model_name stabilityai/stable-diffusion-xl-base-1.0 \
-  --refiner_model_name stabilityai/stable-diffusion-xl-refiner-1.0 \
   --gpu \
   --prompt "photorealistic parliament building along river in summer" \
-  --guidance 8.0 --steps 30 \
-  --refiner_guidance 7.0 --refiner_steps 15 \
-  --precision fp16 --refiner_precision fp16 --two_stage_refiner
+  --guidance 10.0 --steps 30
+```
+
+#### **Multiple prompts with refiner**
+```bash
+python src/imggenhub/kaggle/main.py \
+  --gpu \
+  --prompts "bombed out high rise soviet apartment in kharkiv 2022 ukraine war" "haunted house frightening horror" "peaceful forest autumn sunlight" \
+  --model_name "stabilityai/stable-diffusion-xl-base-1.0" \
+  --refiner_model_name "stabilityai/stable-diffusion-xl-refiner-1.0" \
+  --guidance 10.0 --steps 30 \
+  --refiner_guidance 7.0 --refiner_steps 15
 ```
 
 #### **Advanced photorealistic generation (tested & working)**
 ```bash
-poetry run python -m imggenhub.kaggle.main \
+python src/imggenhub/kaggle/main.py \
   --gpu \
   --model_name "stabilityai/stable-diffusion-xl-base-1.0" \
   --prompt "A highly detailed photorealistic portrait of a young woman with long flowing hair, professional studio lighting, sharp focus on eyes, cinematic composition, 8K resolution, masterpiece quality" \
   --guidance 10.0 \
   --steps 75 \
-  --precision int8 \
+  --precision fp16 \
   --negative_prompt "blurry, low quality, distorted, watermark, duplicate, multiple identical people, clones, repetition, cartoon, anime, painting, drawing, sketch, low resolution, pixelated, noisy, grainy, artifacts, overexposed, underexposed, bad anatomy, deformed, ugly, disfigured, poorly lit, bad composition" \
   --dest "photorealistic_portrait"
 ```
-*Output will be saved to: `output/photorealistic_portrait_YYYYMMDD_HHMMSS/`*
+*Output will be saved to: `output/photorealistic_portrait_YYYYMMDD_HHMMSS/`*. If `--dest` is not provided, the subfolder will only be the datetime one.
 
 #### **Available CLI options**
 ```bash
-poetry run python -m imggenhub.kaggle.main --help
-```
-
-#### **Output directory structure**
-All generated images and logs are automatically organized in timestamped subfolders under the `output/` directory:
-
-```
-output/
-├── final_working_test_20251114_121500/  # --dest "final_working_test" + timestamp
-│   ├── generated_images/                 # Images from the notebook
-│   ├── kaggle_cli_stdout.log            # Kaggle CLI output logs
-│   ├── kaggle_cli_stderr.log            # Kaggle CLI error logs
-│   └── stable-diffusion-batch-generator.log  # Kernel execution logs (if any)
-└── 20251114_121600/                     # Default timestamp-only naming
-    ├── generated_images/
-    └── ...
+python src/imggenhub/kaggle/main.py --help
 ```
 
 **Key parameters:**
@@ -89,18 +76,19 @@ output/
 - Outputs are always saved under `output/` with automatic timestamping
 - All logs from the generation process are saved in the same folder as the images
 - `--prompt`: Single prompt string
-- `--prompts_file`: JSON file with multiple prompts  
-- `--model_name`: Hugging Face model ID
+- `--prompts`: Multiple prompts as space-separated arguments
+- `--prompts_file`: JSON file with multiple prompts
+- `--model_name`: Hugging Face model ID (required)
 - `--refiner_model_name`: SDXL refiner model for enhanced photorealism
-- `--gpu`: Enable GPU acceleration
-- `--precision`: Model precision (fp32/fp16/int8/int4)
-- `--guidance`: Prompt adherence strength (7-12 recommended for photorealism)
-- `--steps`: Inference steps (50-100 for quality)
+- `--gpu`: Enable GPU acceleration on Kaggle
+- `--precision`: Model precision (fp32/fp16/int8/int4, required)
+- `--guidance`: Prompt adherence strength (7-12 recommended for photorealism, required)
+- `--steps`: Inference steps (50-100 for quality, required)
 - `--negative_prompt`: Quality control prompts
-- `--two_stage_refiner`: Use VRAM-optimized two-stage approach (base → unload → refiner)
 - `--refiner_guidance`: Guidance scale for refiner (defaults to same as --guidance)
 - `--refiner_steps`: Inference steps for refiner (defaults to 20)
-- `--refiner_precision`: Precision for refiner (defaults to same as --precision)
+- `--refiner_precision`: Precision for refiner (REQUIRED when using --refiner_model_name)
 - `--refiner_negative_prompt`: Negative prompt for refiner (defaults to same as --negative_prompt)
-- `--notebook`: Custom notebook path
-- `--kernel_path`: Kaggle kernel configuration directory
+- `--hf_token`: HuggingFace API token for accessing gated models
+- `--notebook`: Custom notebook path (default: ./config/kaggle-notebook-image-generation.ipynb)
+- `--kernel_path`: Kaggle kernel configuration directory (default: ./config)

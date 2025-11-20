@@ -7,7 +7,7 @@ import shutil
 import logging
 
 
-def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_path=".", gpu=None, model_id=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None):
+def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_path=".", gpu=None, model_id=None, refiner_model_id=None, guidance=None, steps=None, precision=None, negative_prompt=None, output_dir=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None):
     """
     Deploy Kaggle notebook kernel, optionally overriding prompts and model.
     Automatically selects the correct notebook based on model type.
@@ -97,11 +97,6 @@ def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_
                             output_basename = os.path.basename(output_dir_unix)
                             cell["source"][i] = f"OUTPUT_DIR = \"{output_basename}\"\n"
                             break
-                # Update TWO_STAGE_REFINER if provided
-                for i, line in enumerate(cell["source"]):
-                    if "TWO_STAGE_REFINER =" in line:
-                        cell["source"][i] = f"TWO_STAGE_REFINER = {two_stage_refiner}\n"
-                        break
                 # Update REFINER_GUIDANCE if provided
                 if refiner_guidance is not None:
                     for i, line in enumerate(cell["source"]):
