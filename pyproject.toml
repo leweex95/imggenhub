@@ -22,6 +22,7 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
+imggenhub = "imggenhub.kaggle.main:main"
 test = "pytest:main"
 
 [dependency-groups]
