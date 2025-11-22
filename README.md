@@ -124,6 +124,21 @@ poetry install
 ssh-keygen -t ed25519 -C "your-email@example.com"
 ```
 
+### **CLI Command Overview**
+
+```bash
+poetry run imggenhub-vast {list|instances|reserve|destroy|destroy-all|run|auto} [options]
+```
+
+**Commands:**
+- `list` — Find available GPU offers
+- `instances` — List all active instances  
+- `reserve` — Rent a specific GPU offer
+- `destroy` — Stop billing for one instance
+- `destroy-all` — Emergency cleanup (destroy all instances)
+- `run` — Deploy model on existing instance
+- `auto` — Search, rent, run, and optionally destroy automatically
+
 ---
 
 ## Vast.ai GPU Deployment
