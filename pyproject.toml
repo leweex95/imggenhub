@@ -27,6 +27,7 @@ build-backend = "poetry.core.masonry.api"
 imggenhub = "imggenhub.kaggle.main:main"
 imggenhub-vast = "imggenhub.vast_ai.cli:main"
 imggenhub-forge = "imggenhub.vast_ai.forge_cli:main"
+imggenhub-costs = "imggenhub.vast_ai.cost_cli:main"
 test = "pytest:main"
 
 [dependency-groups]
