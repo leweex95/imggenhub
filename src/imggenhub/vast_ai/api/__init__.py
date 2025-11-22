@@ -78,32 +78,19 @@ class VastAiClient:
             raise ValueError("limit must be a positive integer")
 
         params: Dict[str, Any] = {
-            "limit": limit,
+            "limit": 100,  # Get more offers, filter client-side
         }
 
-        if gpu_name:
-            if not isinstance(gpu_name, str):
-                raise ValueError("gpu_name must be a string")
-            params["gpu_name"] = gpu_name
-
-        if max_price is not None:
-            if not isinstance(max_price, (int, float)) or max_price <= 0:
-                raise ValueError("max_price must be a positive number")
-            params["max_price"] = max_price
-
-        if min_vram is not None:
-            if not isinstance(min_vram, int) or min_vram <= 0:
-                raise ValueError("min_vram must be a positive integer")
-            params["min_vram"] = min_vram
-
         response = requests.get(
-            f"{self.base_url}/search/offers/",
+            f"{self.base_url}bundles",
             headers=self.headers,
             params=params,
             timeout=self.timeout,
         )
         response.raise_for_status()
-        return response.json().get("offers", [])
+        all_offers = response.json().get("offers", [])
+        # Filter to only rentable offers
+        return [offer for offer in all_offers if offer.get("rentable", False)]
 
     def create_instance(
         self,
@@ -161,7 +148,7 @@ class VastAiClient:
             payload["env"] = env
 
         response = requests.put(
-            f"{self.base_url}/asks/{offer_id}/",
+            f"{self.base_url}asks/{offer_id}/",
             headers=self.headers,
             json=payload,
             timeout=self.timeout,
@@ -170,7 +157,10 @@ class VastAiClient:
         data = response.json()
 
         if not data.get("success"):
-            raise RuntimeError(f"Failed to create instance: {data.get('error', 'Unknown error')}")
+            error_type = data.get('error', 'Unknown error')
+            error_msg = data.get('msg', '')
+            full_error = f"{error_type}: {error_msg}" if error_msg else error_type
+            raise RuntimeError(f"Failed to create instance: {full_error}")
 
         instance_id = data.get("new_contract")
         if not instance_id:
@@ -251,8 +241,13 @@ class VastAiClient:
             timeout=self.timeout,
         )
         response.raise_for_status()
-        data = response.json()
-        return data.get("success", False)
+        # API may return empty response on success, treat any 2xx status as success
+        try:
+            data = response.json()
+            return data.get("success", True)
+        except ValueError:
+            # Empty response is considered success
+            return True
 
     def reboot_instance(self, instance_id: int) -> bool:
         """

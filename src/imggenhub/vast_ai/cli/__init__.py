@@ -30,7 +30,7 @@ def _add_api_key_argument(parser: argparse.ArgumentParser) -> None:
 def _add_search_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--gpu-name", type=str, default=None, help="Exact GPU model filter (e.g., 'RTX 4090')")
     parser.add_argument("--min-vram", type=int, default=24, help="Minimum VRAM required in GB (default: 24)")
-    parser.add_argument("--max-price", type=float, default=1.0, help="Maximum hourly price in USD (default: $1.00)")
+    parser.add_argument("--max-hourly-price", type=float, default=1.0, help="Maximum hourly price in USD (default: $1.00)")
     parser.add_argument("--min-reliability", type=float, default=95.0, help="Minimum reliability percentage (default: 95)")
     parser.add_argument("--no-spot", action="store_true", help="Exclude spot instances (prefers on-demand only)")
 
@@ -60,10 +60,10 @@ def _add_generation_arguments(parser: argparse.ArgumentParser, *, include_instan
 def _build_search_criteria(args: argparse.Namespace) -> SearchCriteria:
     return SearchCriteria(
         min_vram=args.min_vram,
-        max_price=args.max_price,
+        max_price=args.max_hourly_price,
         gpu_name=args.gpu_name,
         prefer_spot=not args.no_spot,
-        min_reliability=args.min_reliability,
+        min_reliability=args.min_reliability / 100.0,  # Convert percentage to decimal
     )
 
 
@@ -72,14 +72,16 @@ def _print_offers(offers: list[dict], limit: int) -> None:
         print("No offers matched the given criteria.")
         return
 
-    header = f"{'Offer':>8}  {'GPU':<20}  {'VRAM':>5}  {'$/hr':>8}  {'Reliab%':>8}  {'Location':<10}"
+    header = f"{'Offer ID':>10}  {'GPU':<20}  {'VRAM':>5}  {'$/hr':>8}  {'Reliab%':>8}  {'Location':<10}"
     print(header)
     print("-" * len(header))
     for offer in offers[:limit]:
+        vram_gb = int(offer.get('gpu_total_ram', 0) / 1024)  # Convert MB to GB
+        reliability_pct = offer.get('reliability2', 0) * 100  # Convert decimal to percentage
         print(
-            f"{offer.get('id'):>8}  {offer.get('gpu_name','-'):<20}  "
-            f"{offer.get('gpu_total_ram','-'):>5}  {offer.get('dph_total','-'):>8}  "
-            f"{offer.get('reliability2','-'):>8}  {offer.get('location','-'):<10}"
+            f"{offer.get('id'):>10}  {offer.get('gpu_name','-'):<20}  "
+            f"{vram_gb:>5}  {offer.get('dph_total','-'):>8}  "
+            f"{reliability_pct:>8.1f}  {offer.get('geolocation','-'):<10}"
         )
 
 
@@ -89,6 +91,46 @@ def _expand_ssh_key(path: Optional[str]) -> Optional[str]:
     return str(Path(path).expanduser())
 
 
+def _destroy_all_instances(client: VastAiClient) -> None:
+    """Destroy all active instances. Used for emergency cleanup on credit errors."""
+    try:
+        instances = client.list_instances()
+        if not instances:
+            logger.info("No instances to destroy.")
+            return
+        
+        for instance in instances:
+            try:
+                success = client.destroy_instance(instance.id)
+                if success:
+                    logger.info(f"Destroyed instance {instance.id} ({instance.gpu_name})")
+                else:
+                    logger.warning(f"Failed to destroy instance {instance.id}")
+            except Exception as exc:
+                logger.warning(f"Error destroying instance {instance.id}: {exc}")
+    except Exception as exc:
+        logger.error(f"Error listing instances for cleanup: {exc}")
+
+
+def _list_instances(client: VastAiClient) -> None:
+    """Print all active instances in a formatted table."""
+    instances = client.list_instances()
+    if not instances:
+        print("No active instances.")
+        return
+    
+    header = f"{'Instance ID':>10}  {'GPU':<20}  {'Status':<15}  {'Cost/hr':>8}  {'SSH':<25}"
+    print(header)
+    print("-" * len(header))
+    for instance in instances:
+        ssh_addr = f"{instance.ssh_user}@{instance.ssh_host}:{instance.ssh_port}"
+        print(
+            f"{instance.id:>10}  {instance.gpu_name:<20}  "
+            f"{instance.status:<15}  ${instance.price_per_hour:>7.4f}  {ssh_addr:<25}"
+        )
+
+
+
 def handle_list(args: argparse.Namespace) -> int:
     orchestrator = AutoDeploymentOrchestrator(api_key=args.api_key)
     offers = orchestrator.search_and_rank(_build_search_criteria(args))
@@ -96,14 +138,72 @@ def handle_list(args: argparse.Namespace) -> int:
     return 0 if offers else 1
 
 
+def handle_destroy(args: argparse.Namespace) -> int:
+    """Destroy a specific instance by ID."""
+    client = VastAiClient(args.api_key)
+    try:
+        success = client.destroy_instance(args.instance_id)
+        if success:
+            print(f"Successfully destroyed instance {args.instance_id}")
+            return 0
+        else:
+            print(f"Failed to destroy instance {args.instance_id}")
+            return 1
+    except Exception as exc:
+        logger.error(f"Error destroying instance {args.instance_id}: {exc}")
+        return 1
+
+
+def handle_destroy_all(args: argparse.Namespace) -> int:
+    """Destroy all active instances."""
+    client = VastAiClient(args.api_key)
+    instances = client.list_instances()
+    
+    if not instances:
+        print("No active instances to destroy.")
+        return 0
+    
+    print(f"Found {len(instances)} active instance(s). Destroying all...")
+    destroyed_count = 0
+    
+    for instance in instances:
+        try:
+            success = client.destroy_instance(instance.id)
+            if success:
+                print(f"✓ Destroyed instance {instance.id} ({instance.gpu_name})")
+                destroyed_count += 1
+            else:
+                print(f"✗ Failed to destroy instance {instance.id}")
+        except Exception as exc:
+            print(f"✗ Error destroying instance {instance.id}: {exc}")
+    
+    print(f"\nDestroyed {destroyed_count}/{len(instances)} instance(s)")
+    return 0 if destroyed_count == len(instances) else 1
+
+
+def handle_instances(args: argparse.Namespace) -> int:
+    """List all active instances."""
+    client = VastAiClient(args.api_key)
+    _list_instances(client)
+    return 0
+
+
 def handle_reserve(args: argparse.Namespace) -> int:
     client = VastAiClient(args.api_key)
-    instance = client.create_instance(
-        offer_id=args.offer_id,
-        image=args.image,
-        disk_size=args.disk_size,
-        label=args.label,
-    )
+    try:
+        instance = client.create_instance(
+            offer_id=args.offer_id,
+            image=args.image,
+            disk_size=args.disk_size,
+            label=args.label,
+        )
+    except RuntimeError as exc:
+        error_msg = str(exc)
+        if "insufficient_credit" in error_msg:
+            logger.error("Insufficient credit error detected. Destroying all instances...")
+            _destroy_all_instances(client)
+            logger.error("All instances destroyed to prevent further costs.")
+        raise
 
     print("Instance created:")
     print(f"  Instance ID : {instance.id}")
@@ -208,14 +308,30 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--limit", type=int, default=10, help="Number of offers to display (default: 10)")
     list_parser.set_defaults(handler=handle_list)
 
+    # instances
+    instances_parser = subparsers.add_parser("instances", help="List all active instances")
+    _add_api_key_argument(instances_parser)
+    instances_parser.set_defaults(handler=handle_instances)
+
     # reserve
     reserve_parser = subparsers.add_parser("reserve", help="Reserve a specific offer by ID")
     _add_api_key_argument(reserve_parser)
-    reserve_parser.add_argument("--offer-id", type=int, required=True, help="Offer/ask ID returned by the list command")
+    reserve_parser.add_argument("--offer-id", type=int, required=True, help="Marketplace offer ID from the 'list' command (different from instance ID)")
     reserve_parser.add_argument("--image", type=str, default="pytorch/pytorch:latest", help="Docker image to boot (default: pytorch/pytorch:latest)")
     reserve_parser.add_argument("--disk-size", type=int, default=40, help="Disk size in GB (default: 40)")
     reserve_parser.add_argument("--label", type=str, default=None, help="Optional label for the instance")
     reserve_parser.set_defaults(handler=handle_reserve)
+
+    # destroy
+    destroy_parser = subparsers.add_parser("destroy", help="Destroy a specific instance by ID")
+    _add_api_key_argument(destroy_parser)
+    destroy_parser.add_argument("--instance-id", type=int, required=True, help="Instance ID to destroy")
+    destroy_parser.set_defaults(handler=handle_destroy)
+
+    # destroy-all
+    destroy_all_parser = subparsers.add_parser("destroy-all", help="Destroy all active instances")
+    _add_api_key_argument(destroy_all_parser)
+    destroy_all_parser.set_defaults(handler=handle_destroy_all)
 
     # run
     run_parser = subparsers.add_parser("run", help="Deploy and run a model on an existing instance")

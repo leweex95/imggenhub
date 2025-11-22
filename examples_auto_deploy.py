@@ -72,7 +72,7 @@ def example_2_rent_and_connect():
 def example_3_full_workflow():
     """Example 3: Full workflow (search → rent → deploy → cleanup)."""
     logger.info("\n=== EXAMPLE 3: Full Auto-Deployment Workflow ===\n")
-    logger.info("This is what 'imggenhub-auto-sd' does internally:")
+    logger.info("This is what 'imggenhub-vast auto' does internally:")
     logger.info("1. Search Vast.ai for cheapest P40 GPU")
     logger.info("2. Rent it")
     logger.info("3. Wait for SSH")
@@ -80,7 +80,7 @@ def example_3_full_workflow():
     logger.info("5. Generate image from prompt")
     logger.info("6. Destroy instance")
     logger.info("\nTo run this, execute:")
-    logger.info("  poetry run imggenhub-auto-sd sd --prompt 'a landscape'")
+    logger.info("  poetry run imggenhub-vast auto --prompt 'a landscape'")
 
 
 if __name__ == "__main__":

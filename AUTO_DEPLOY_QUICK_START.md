@@ -69,7 +69,7 @@ poetry run imggenhub-vast auto \
 ```bash
 poetry run imggenhub-vast auto \
   --prompt "a landscape" \
-  --max-price 0.15
+  --max-hourly-price 0.15
 ```
 - GPU: Tesla P40 (~$0.11/hr)
 - Time: ~2 minutes
@@ -80,7 +80,7 @@ poetry run imggenhub-vast auto \
 poetry run imggenhub-vast auto \
   --gpu-name "RTX 4090" \
   --min-vram 24 \
-  --max-price 1.00 \
+  --max-hourly-price 1.00 \
   --prompt "a detailed portrait"
 ```
 - GPU: RTX 4090 (3-5x faster)
@@ -115,13 +115,13 @@ Filter by price and VRAM:
 ```bash
 poetry run imggenhub-vast list \
   --min-vram 24 \
-  --max-price 0.20 \
+  --max-hourly-price 0.20 \
   --limit 15
 ```
 
 Output:
 ```
-Offer        GPU                  VRAM  $/hr    Reliab%  Location
+Offer ID      GPU                  VRAM  $/hr    Reliab%  Location
    22589934  Tesla P40           24GB  0.1100    99.88  EU-DE
    22589945  RTX 2080 Ti         11GB  0.0850    98.50  US-CA
    22589956  V100                 32GB  0.2500    99.90  US-NY
@@ -171,7 +171,7 @@ Manually destroy when done (via Vast.ai dashboard or API)
 poetry run imggenhub-vast auto \
   --gpu-name "RTX 4090"          # Exact GPU match
   --min-vram 32                  # Minimum VRAM in GB
-  --max-price 0.50               # Maximum $/hour
+  --max-hourly-price 0.50               # Maximum $/hour
   --min-reliability 95            # Uptime percentage
   --no-spot                      # Only on-demand (not spot)
 ```
@@ -198,7 +198,7 @@ poetry run imggenhub-vast auto \
 
 | Problem | Solution |
 |---------|----------|
-| "No offers matched" | Increase `--max-price` or decrease `--min-vram` |
+| "No offers matched" | Increase `--max-hourly-price` or decrease `--min-vram` |
 | SSH timeout | GPU still booting; wait a minute and try `run` again |
 | "Permission denied" | Verify SSH key at `SSH_PRIVATE_KEY_PATH` in `.env` |
 | Instance left running | Use `--keep-instance` sparingly; manually destroy in dashboard |
@@ -209,10 +209,10 @@ poetry run imggenhub-vast auto \
 
 ```bash
 # Find Tesla P40 under $0.15/hr
---gpu-name "P40" --max-price 0.15
+--gpu-name "P40" --max-hourly-price 0.15
 
 # Find 40GB+ VRAM GPU under $1/hr
---min-vram 40 --max-price 1.0
+--min-vram 40 --max-hourly-price 1.0
 
 # Only high-reliability (99%+) instances
 --min-reliability 99.0
@@ -278,15 +278,15 @@ Auto-deployment streams output in real-time:
 2. **Batch generations** → Keep instance alive for multiple images
 3. **Lower steps** → Use `--steps 20-25` instead of 50+ for drafts
 4. **Check specs** → `--gpu-name "RTX 4090"` forces high-end only
-5. **Test first** → Try with `--max-price 0.20` before exploring expensive GPUs
+5. **Test first** → Try with `--max-hourly-price 0.20` before exploring expensive GPUs
 
 ---
 
 ## ❌ Troubleshooting
 
 **"No suitable GPU offers found"**
-- Relax criteria: increase `--max-price`, decrease `--min-vram`
-- Try: `--max-price 1.5 --min-vram 20`
+- Relax criteria: increase `--max-hourly-price`, decrease `--min-vram`
+- Try: `--max-hourly-price 1.5 --min-vram 20`
 
 **SSH connection timeout**
 - Increase timeout: `--ssh-timeout 600` (10 minutes)

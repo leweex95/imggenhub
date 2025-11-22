@@ -99,6 +99,33 @@ python src/imggenhub/kaggle/main.py --help
 
 ---
 
+## Setup
+
+### **Vast.ai Account (for GPU deployment)**
+
+1. **Create account**: Sign up at [vast.ai](https://vast.ai/)
+2. **Add API key**: Get your API key from Account → API Keys  
+3. **Add credit**: Fund your account with at least $5-10 (required for GPU rental)
+   - Credit card or crypto accepted
+   - Costs start at ~$0.10/hour for basic GPUs
+4. **Configure environment**: Set `VAST_API_KEY` in your `.env` file
+
+### **Local Installation**
+
+```bash
+# Clone repository
+git clone https://github.com/leweex95/imggenhub.git
+cd imggenhub
+
+# Install dependencies
+poetry install
+
+# Configure SSH key (for Vast.ai instance access)
+ssh-keygen -t ed25519 -C "your-email@example.com"
+```
+
+---
+
 ## Vast.ai GPU Deployment
 
 ### **Automatic GPU deployment (recommended)**
@@ -109,7 +136,7 @@ Let ImgGenHub find the cheapest qualifying GPU, rent it, run your prompt, and sh
 # Auto-search for cheapest P40+ GPU under $0.50/hr and generate
 poetry run imggenhub-vast auto \
   --prompt "a photorealistic landscape" \
-  --max-price 0.50 \
+  --max-hourly-price 0.50 \
   --steps 30 \
   --guidance 7.5
 
@@ -117,7 +144,7 @@ poetry run imggenhub-vast auto \
 poetry run imggenhub-vast auto \
   --gpu-name "RTX 4090" \
   --min-vram 40 \
-  --max-price 0.80 \
+  --max-hourly-price 0.80 \
   --prompt "a detailed portrait" \
   --steps 45
 
@@ -136,7 +163,7 @@ Use `--keep-instance` to leave the machine running for additional jobs. Without 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
 | `--min-vram` | 24 GB | Minimum VRAM required |
-| `--max-price` | $1.00/hr | Maximum hourly cost |
+| `--max-hourly-price` | $1.00/hr | Maximum hourly cost |
 | `--gpu-name` | Any | Filter by GPU type (e.g., RTX 4090) |
 | `--min-reliability` | 95% | Minimum uptime reliability |
 | `--no-spot` | Disabled | Only on-demand (no spot instances) |
@@ -161,10 +188,21 @@ Sometimes you want full control: inspect available offers, pick one, rent it, th
 #### 1. List available offers
 ```bash
 poetry run imggenhub-vast list \
-  --max-price 0.20 \
+  --max-hourly-price 0.20 \
   --min-vram 24 \
   --limit 15
 ```
+
+**Example output:**
+```
+Offer ID      GPU                  VRAM  $/hr    Reliab%  Location
+   22589934  Tesla P40            24GB  0.1100    99.88  EU-DE
+   22589945  RTX 2080 Ti          11GB  0.0850    98.50  US-CA
+   22589956  V100                 32GB  0.2500    99.90  US-NY
+   22589967  RTX 4090             24GB  0.1950    99.75  US-CA
+```
+
+**Note:** The "Offer ID" is a marketplace identifier (different from the instance ID you'll get after reserving).
 
 #### 2. Reserve a specific offer
 ```bash
@@ -173,7 +211,7 @@ poetry run imggenhub-vast reserve \
   --disk-size 40 \
   --image pytorch/pytorch:latest
 ```
-The command prints the instance ID, SSH endpoint, and hourly cost.
+The command prints the instance ID, SSH endpoint, and hourly cost. **Note:** The offer ID (from step 1) is different from the instance ID (created in this step).
 
 #### 3. Run any model by supplying its `--model-name`
 
@@ -198,6 +236,25 @@ poetry run imggenhub-vast run \
 ```
 
 Use the same `run` command for any Hugging Face model—only the `--model-name`, `--steps`, and `--guidance` need to change.
+
+#### 4. Destroy instances to stop billing
+
+View all active instances:
+```bash
+poetry run imggenhub-vast instances
+```
+
+Destroy one specific instance:
+```bash
+poetry run imggenhub-vast destroy --instance-id 28116358
+```
+
+Destroy all instances (emergency cleanup):
+```bash
+poetry run imggenhub-vast destroy-all
+```
+
+**Important:** Instances continue billing as long as they're running, even if idle. Always destroy instances when done.
 
 #### **Deploy Forge UI (web interface)**
 ```bash
@@ -253,6 +310,11 @@ ssh -p 36359 root@ssh4.vast.ai
 
 ### **Troubleshooting**
 
+**Insufficient credit error?**
+- ImgGenHub automatically destroys all instances to prevent further charges
+- Add credit to your Vast.ai account
+- Retry the operation
+
 **Connection timeout?**
 - Verify SSH key permissions: `chmod 600 ~/.ssh/id_ed25519`
 - Check firewall: Vast.ai instances require outbound SSH access
@@ -265,5 +327,9 @@ ssh -p 36359 root@ssh4.vast.ai
 **Slow generation?**
 - Check GPU utilization: `nvidia-smi` on the instance
 - Consider using RTX 4090 for faster speeds
+
+**Unexpected charges/instances running?**
+- Use `poetry run imggenhub-vast instances` to see all active instances
+- Use `poetry run imggenhub-vast destroy-all` for emergency cleanup
 
 ````

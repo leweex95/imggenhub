@@ -81,6 +81,14 @@ class AutoDeploymentOrchestrator:
                 if reliability < criteria.min_reliability:
                     continue
 
+                # Apply price filter
+                if price > criteria.max_price:
+                    continue
+
+                # Apply VRAM filter  
+                if vram < criteria.min_vram:
+                    continue
+
                 # Calculate value score (lower = better): price per VRAM
                 value_score = price / vram if vram > 0 else float("inf")
 
@@ -96,15 +104,24 @@ class AutoDeploymentOrchestrator:
 
         logger.info(f"Found {len(filtered_offers)} matching offers")
         for i, offer in enumerate(filtered_offers[:5]):
+            vram_gb = int(offer.get('gpu_total_ram', 0) / 1024)
+            reliability_pct = offer.get('reliability2', 0) * 100
             logger.info(
                 f"  {i+1}. {offer.get('gpu_name', 'Unknown')} "
-                f"({offer.get('gpu_total_ram')}GB) @ ${offer.get('dph_total')}/hr "
-                f"(reliability: {offer.get('reliability2')}%)"
+                f"({vram_gb}GB) @ ${offer.get('dph_total')}/hr "
+                f"(reliability: {reliability_pct:.1f}%)"
             )
 
         return filtered_offers
 
-    def rent_cheapest(self, criteria: SearchCriteria) -> RentedInstance:
+    def rent_cheapest(
+        self,
+        criteria: SearchCriteria,
+        *,
+        image: str = "pytorch/pytorch:latest",
+        disk_size: int = 20,
+        label: Optional[str] = None,
+    ) -> RentedInstance:
         """
         Search for cheapest GPU matching criteria and rent it.
 
@@ -133,9 +150,9 @@ class AutoDeploymentOrchestrator:
         try:
             instance = self.client.create_instance(
                 offer_id=offer_id,
-                image="pytorch/pytorch:latest",  # Default image
-                disk_size=20,
-                label=f"autogen-{int(time.time())}",
+                image=image,
+                disk_size=disk_size,
+                label=label or f"autogen-{int(time.time())}",
             )
 
             self.rented_instance = RentedInstance(
@@ -148,12 +165,21 @@ class AutoDeploymentOrchestrator:
             )
 
             logger.info(f"✓ Instance rented: {self.rented_instance.instance_id}")
-            logger.info(f"  SSH: {self.ssh_user}@{self.ssh_host}:{self.ssh_port}")
+            logger.info(
+                "  SSH: %s@%s:%s",
+                self.rented_instance.ssh_user,
+                self.rented_instance.ssh_host,
+                self.rented_instance.ssh_port,
+            )
             logger.info(f"  Cost: ${price:.4f}/hr")
 
             return self.rented_instance
 
-        except Exception as e:
+        except RuntimeError as e:
+            error_msg = str(e).lower()
+            if "insufficient_credit" in error_msg:
+                logger.error("Insufficient credit detected. Destroying all instances to prevent further costs...")
+                self._destroy_all_instances()
             logger.error(f"Failed to rent instance: {e}")
             raise
 
@@ -253,6 +279,36 @@ class AutoDeploymentOrchestrator:
         except Exception as e:
             logger.error(f"Failed to destroy instance: {e}")
             return False
+
+    def _destroy_all_instances(self) -> None:
+        """Destroy all active instances (emergency cleanup for insufficient credit)."""
+        try:
+            instances = self.client.list_instances()
+            if not instances:
+                logger.info("No instances to destroy")
+                return
+            
+            logger.info(f"Destroying {len(instances)} instance(s)...")
+            destroyed = 0
+            for instance in instances:
+                try:
+                    success = self.client.destroy_instance(instance.id)
+                    if success:
+                        logger.info(f"✓ Destroyed instance {instance.id} ({instance.gpu_name})")
+                        destroyed += 1
+                    else:
+                        logger.warning(f"Failed to destroy instance {instance.id}")
+                except Exception as e:
+                    logger.warning(f"Error destroying instance {instance.id}: {e}")
+            
+            logger.info(f"Destroyed {destroyed}/{len(instances)} instance(s)")
+            if self.rented_instance:
+                self.rented_instance = None
+            if self.ssh_client:
+                self.ssh_client.disconnect()
+                self.ssh_client = None
+        except Exception as e:
+            logger.error(f"Error listing instances for cleanup: {e}")
 
     def get_instance_info(self) -> Optional[RentedInstance]:
         """Get current rented instance info."""

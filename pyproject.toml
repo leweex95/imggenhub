@@ -29,9 +29,6 @@ imggenhub-vast = "imggenhub.vast_ai.cli:main"
 imggenhub-forge = "imggenhub.vast_ai.forge_cli:main"
 imggenhub-costs = "imggenhub.vast_ai.cost_cli:main"
 imggenhub-vast-dummy = "imggenhub.vast_ai.dummy_cli:main"
-imggenhub-vast-sd = "imggenhub.vast_ai.stable_cli:main"
-imggenhub-vast-flux = "imggenhub.vast_ai.flux_cli:main"
-imggenhub-auto-sd = "imggenhub.vast_ai.auto_deploy_cli:main"
 test = "pytest:main"
 
 [dependency-groups]
