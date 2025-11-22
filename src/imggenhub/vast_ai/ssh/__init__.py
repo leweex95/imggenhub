@@ -1,9 +1,11 @@
 """SSH client for executing commands on remote Vast.ai instances."""
+import logging
+import time
+from pathlib import Path
+from typing import Callable, Optional, Tuple
+
 import paramiko
 import stat
-from pathlib import Path
-from typing import Optional, Tuple
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +124,56 @@ class SSHClient:
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
             raise RuntimeError(f"Command execution failed: {e}") from e
+
+    def execute_streaming(
+        self,
+        command: str,
+        on_chunk: Optional[Callable[[str], None]] = None,
+        poll_interval: float = 0.25,
+    ) -> Tuple[int, str, str]:
+        """Execute a command while streaming stdout/stderr in real time."""
+        if poll_interval <= 0:
+            raise ValueError("poll_interval must be positive")
+
+        if not command or not isinstance(command, str):
+            raise ValueError("command must be a non-empty string")
+
+        if not self.client or not self.client.get_transport() or not self.client.get_transport().is_active():
+            raise RuntimeError("Not connected to remote host. Call connect() first.")
+
+        transport = self.client.get_transport()
+        if transport is None:
+            raise RuntimeError("SSH transport is not available")
+
+        channel = transport.open_session()
+        channel.exec_command(command)
+
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+
+        try:
+            while True:
+                if channel.recv_ready():
+                    data = channel.recv(4096).decode("utf-8", errors="replace")
+                    stdout_chunks.append(data)
+                    if on_chunk:
+                        on_chunk(data)
+
+                if channel.recv_stderr_ready():
+                    data = channel.recv_stderr(4096).decode("utf-8", errors="replace")
+                    stderr_chunks.append(data)
+                    if on_chunk:
+                        on_chunk(data)
+
+                if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
+                    break
+
+                time.sleep(poll_interval)
+
+            exit_code = channel.recv_exit_status()
+            return exit_code, "".join(stdout_chunks), "".join(stderr_chunks)
+        finally:
+            channel.close()
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         """

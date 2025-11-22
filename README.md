@@ -4,9 +4,7 @@
 
 **A personal, cost-efficient AI image generation platform.**
 
-ImgGenHub is a personal image generation hub that connects to web-based image generation services, currently featuring a fully automated Kaggle-based pipeline with plans for multi-platform support.
-
-In the future, Google Colab and paid Vast.ai GPU support will also be implemented.
+ImgGenHub is a personal image generation hub that connects to web-based image generation services, currently featuring a fully automated Kaggle-based pipeline with paid Vast.ai GPU support for high-speed generation.
 
 ---
 
@@ -20,6 +18,12 @@ In the future, Google Colab and paid Vast.ai GPU support will also be implemente
 - **Multiple models**: Support for popular Stable Diffusion variants including SDXL with refiner
 - **Batch processing**: Multiple prompts in a single execution
 - **Flexible prompting**: Command-line prompts or JSON file batch processing
+
+#### **Vast.ai GPU deployment**
+- **On-demand GPU rental**: Rent Tesla P40, RTX 3090, RTX 4090, and other GPUs by the hour
+- **Real-time streaming**: Console output and progress logs stream live to your local terminal
+- **Multiple models**: Stable Diffusion, Flux, and Forge UI support
+- **Cost-effective**: $0.10-0.50/hr depending on GPU selection
 
 #### **GitHub Actions automation**
 - **On-Demand generation**: Manual workflow triggers with custom parameters
@@ -92,3 +96,174 @@ python src/imggenhub/kaggle/main.py --help
 - `--hf_token`: HuggingFace API token for accessing gated models
 - `--notebook`: Custom notebook path (default: ./config/kaggle-notebook-image-generation.ipynb)
 - `--kernel_path`: Kaggle kernel configuration directory (default: ./config)
+
+---
+
+## Vast.ai GPU Deployment
+
+### **Automatic GPU deployment (recommended)**
+
+Let ImgGenHub find the cheapest qualifying GPU, rent it, run your prompt, and shut it down when finished:
+
+```bash
+# Auto-search for cheapest P40+ GPU under $0.50/hr and generate
+poetry run imggenhub-vast auto \
+  --prompt "a photorealistic landscape" \
+  --max-price 0.50 \
+  --steps 30 \
+  --guidance 7.5
+
+# Focus on RTX 4090 offers with 40GB+ VRAM
+poetry run imggenhub-vast auto \
+  --gpu-name "RTX 4090" \
+  --min-vram 40 \
+  --max-price 0.80 \
+  --prompt "a detailed portrait" \
+  --steps 45
+
+# Flux model (just change --model-name)
+poetry run imggenhub-vast auto \
+  --model-name black-forest-labs/FLUX.1-schnell \
+  --prompt "abstract artwork" \
+  --steps 25 \
+  --guidance 3.5
+```
+
+Use `--keep-instance` to leave the machine running for additional jobs. Without it, ImgGenHub automatically destroys the instance after the run finishes (or immediately on failure unless `--preserve-on-failure` is set).
+
+#### **Auto-deployment search criteria**
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `--min-vram` | 24 GB | Minimum VRAM required |
+| `--max-price` | $1.00/hr | Maximum hourly cost |
+| `--gpu-name` | Any | Filter by GPU type (e.g., RTX 4090) |
+| `--min-reliability` | 95% | Minimum uptime reliability |
+| `--no-spot` | Disabled | Only on-demand (no spot instances) |
+
+#### **Automatic vs Manual comparison**
+
+| Task | Manual | Auto |
+|------|--------|------|
+| Search GPUs | ✋ Dashboard filters | 🤖 `imggenhub-vast auto` search |
+| Rent GPU | ✋ Click "Rent" | 🤖 API rental |
+| Wait for SSH | ✋ Manual polling | 🤖 Auto-polling |
+| Deploy | ✋ SSH + scripts | 🤖 Automatic upload & run |
+| Cleanup | ✋ Destroy instance | 🤖 Automatic unless `--keep-instance` |
+| **Typical cost** | ~$0.113 (P40 for 1 hr) | ~$0.03 (P40 for 15 min) |
+
+---
+
+### **Manual GPU workflow (advanced)**
+
+Sometimes you want full control: inspect available offers, pick one, rent it, then decide which model to run. The unified `imggenhub-vast` CLI exposes each step.
+
+#### 1. List available offers
+```bash
+poetry run imggenhub-vast list \
+  --max-price 0.20 \
+  --min-vram 24 \
+  --limit 15
+```
+
+#### 2. Reserve a specific offer
+```bash
+poetry run imggenhub-vast reserve \
+  --offer-id 22589934 \
+  --disk-size 40 \
+  --image pytorch/pytorch:latest
+```
+The command prints the instance ID, SSH endpoint, and hourly cost.
+
+#### 3. Run any model by supplying its `--model-name`
+
+Stable Diffusion example:
+```bash
+poetry run imggenhub-vast run \
+  --instance-id 28116358 \
+  --ssh-key ~/.ssh/id_ed25519 \
+  --model-name stabilityai/stable-diffusion-3.5-large \
+  --prompt "a photorealistic landscape with mountains and lake at sunset" \
+  --steps 30 --guidance 7.5
+```
+
+Flux example (same command, different model/guidance):
+```bash
+poetry run imggenhub-vast run \
+  --instance-id 28116358 \
+  --ssh-key ~/.ssh/id_ed25519 \
+  --model-name black-forest-labs/FLUX.1-schnell \
+  --prompt "a portrait with professional studio lighting, sharp focus" \
+  --steps 25 --guidance 3.5
+```
+
+Use the same `run` command for any Hugging Face model—only the `--model-name`, `--steps`, and `--guidance` need to change.
+
+#### **Deploy Forge UI (web interface)**
+```bash
+poetry run imggenhub-vast-forge \
+  --instance-id 28116358 \
+  --ssh-key ~/.ssh/id_ed25519
+```
+Then access the web interface at the displayed URL (typically `http://host:7860`).
+
+#### **Test SSH connectivity (dummy run)**
+```bash
+poetry run imggenhub-vast-dummy \
+  --instance-id 28116358 \
+  --ssh-key ~/.ssh/id_ed25519
+```
+
+### **Real-time Output Streaming**
+
+All Vast.ai commands stream console output live as the remote GPU processes:
+- ? Progress updates and logs appear instantly
+- ? Errors are caught and displayed immediately
+- ? Output is saved locally for review
+
+### **Supported GPU Models**
+
+Tested configurations:
+
+| GPU | VRAM | Cost/hr | Best For |
+|-----|------|---------|----------|
+| **Tesla P40** | 24GB GDDR5 | $0.11-0.15 | Stable Diffusion, basic Flux |
+| **RTX 3090** | 24GB GDDR6X | $0.20-0.30 | Fast SD generation, Flux |
+| **RTX 4090** | 24GB GDDR6X | $0.40-0.50 | High-speed SD/Flux, batches |
+| **A100** | 40GB HBM2 | $0.50-1.00 | Multi-batch, large models |
+
+### **Cost-Effective Tips**
+
+- ?? Use **spot instances** for 30-70% savings
+- ?? **Filter by location** to reduce latency and cost
+- ?? **Batch multiple generations** in one session
+- ? Use **`--steps 20-30`** for cost-effective quality
+- ?? Download generated images immediately to free GPU memory
+
+### **SSH Connection Details**
+
+For direct SSH access:
+```bash
+# Direct connection
+ssh -p 56836 root@183.89.209.74
+
+# Via proxy (if direct fails)
+ssh -p 36359 root@ssh4.vast.ai
+```
+
+### **Troubleshooting**
+
+**Connection timeout?**
+- Verify SSH key permissions: `chmod 600 ~/.ssh/id_ed25519`
+- Check firewall: Vast.ai instances require outbound SSH access
+- Verify instance is still running on Vast.ai dashboard
+
+**GPU out of memory?**
+- Reduce `--steps` parameter
+- Use smaller models (SD 1.5 vs SDXL)
+
+**Slow generation?**
+- Check GPU utilization: `nvidia-smi` on the instance
+- Consider using RTX 4090 for faster speeds
+
+````

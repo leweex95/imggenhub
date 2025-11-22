@@ -151,20 +151,7 @@ def run(prompts_list, notebook="kaggle-notebook-image-generation.ipynb", kernel_
     
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(kernel_meta, f, indent=2)
-    
-    # VERIFY that metadata was updated correctly
-    with open(metadata_path, "r", encoding="utf-8") as f:
-        verify_meta = json.load(f)
-    
-    if verify_meta.get("code_file") != notebook:
-        raise RuntimeError(
-            f"ERROR: Metadata update verification failed!\n"
-            f"  Expected code_file: {notebook}\n"
-            f"  Got code_file: {verify_meta.get('code_file')}\n"
-            f"  Metadata file: {metadata_path}"
-        )
-    
-    logging.info(f"✓ VERIFIED: Metadata correctly updated from '{original_code_file}' to '{notebook}'")
+    logging.info(f"✓ Updated metadata from '{original_code_file}' to '{notebook}'")
     
     # Push via Kaggle CLI - try Poetry first, fallback to direct python
     kaggle_cmd = _get_kaggle_command()

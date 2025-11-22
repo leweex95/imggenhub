@@ -42,7 +42,7 @@ class VastAiClient:
         else:
             if not api_key or not isinstance(api_key, str):
                 raise ValueError("api_key must be a non-empty string")
-            self.base_url = "https://api.vast.ai/api/v0"
+            self.base_url = "https://console.vast.ai/api/v0/"
             self.timeout = 30
 
         self.api_key = api_key
@@ -220,7 +220,7 @@ class VastAiClient:
             requests.RequestException: If API request fails.
         """
         response = requests.get(
-            f"{self.base_url}/instances/",
+            f"{self.base_url}instances/",
             headers=self.headers,
             timeout=self.timeout,
         )

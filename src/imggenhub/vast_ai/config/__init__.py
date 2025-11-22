@@ -22,7 +22,7 @@ class VastAiConfig:
         """
         self._load_env_file(env_file)
         self.api_key = self._get_required_env("VAST_AI_API_KEY")
-        self.base_url = os.getenv("VAST_AI_BASE_URL", "https://api.vast.ai/api/v0")
+        self.base_url = os.getenv("VAST_AI_BASE_URL", "https://console.vast.ai/api/v0/")
         self.timeout = int(os.getenv("VAST_AI_TIMEOUT", "30"))
 
     def _load_env_file(self, env_file: Optional[Path]) -> None:
@@ -41,7 +41,11 @@ class VastAiConfig:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     key, value = line.split("=", 1)
-                    os.environ.setdefault(key.strip(), value.strip())
+                    value = value.strip()
+                    # Remove surrounding quotes if present
+                    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                        value = value[1:-1]
+                    os.environ.setdefault(key.strip(), value)
 
     @staticmethod
     def _get_required_env(key: str) -> str:

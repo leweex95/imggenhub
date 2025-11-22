@@ -1,7 +1,9 @@
 """Remote pipeline orchestration for Vast.ai GPU instances."""
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
+
 from imggenhub.vast_ai.api import VastAiClient, VastInstance
 from imggenhub.vast_ai.ssh import SSHClient
 
@@ -36,6 +38,7 @@ class RemoteExecutor:
             password=ssh_password,
         )
         self.vast_client = VastAiClient(api_key)
+        self.last_log_path: Optional[Path] = None
 
     def setup_environment(self, setup_script_path: Optional[str] = None) -> None:
         """
@@ -251,14 +254,29 @@ class RemoteExecutor:
 
         command = " ".join(cmd_parts)
 
+        log_dir = Path("output") / "vast_ai_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"pipeline_{self.instance.id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.log"
+        self.last_log_path = log_path
+
         try:
             self.ssh_client.connect()
             logger.info(f"Executing: {command}")
-            exit_code, stdout, stderr = self.ssh_client.execute(command)
+
+            with log_path.open("w", encoding="utf-8") as handle:
+                def _on_chunk(chunk: str) -> None:
+                    print(chunk, end="")
+                    handle.write(chunk)
+                    handle.flush()
+
+                exit_code, stdout, stderr = self.ssh_client.execute_streaming(command, on_chunk=_on_chunk)
 
             if exit_code != 0:
                 logger.error(f"Pipeline failed with exit code {exit_code}")
                 logger.error(f"Stderr: {stderr}")
+            else:
+                logger.info("Pipeline logs captured successfully")
+            logger.info(f"Live log stream saved to: {log_path}")
 
             return exit_code, stdout, stderr
         except Exception as e:
