@@ -1,5 +1,6 @@
 """SSH client for executing commands on remote Vast.ai instances."""
 import paramiko
+import stat
 from pathlib import Path
 from typing import Optional, Tuple
 import logging
@@ -275,7 +276,6 @@ class SSHClient:
                     else:
                         sftp.get(remote_item_path, str(local_item_path))
 
-            import stat
             download_recursive(remote_dir, local_dir)
             sftp.close()
             logger.info(f"Directory downloaded: {self.host}:{remote_dir} -> {local_dir}")

@@ -3,6 +3,7 @@ import requests
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
 from datetime import datetime
+from imggenhub.vast_ai.config import get_vast_ai_config
 
 
 @dataclass
@@ -23,20 +24,27 @@ class VastInstance:
 class VastAiClient:
     """Client for interacting with Vast.ai API."""
 
-    BASE_URL = "https://console.vast.ai/api/v0"
-
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: Optional[str] = None):
         """
         Initialize Vast.ai client with API key.
 
         Args:
-            api_key: Vast.ai API key for authentication. Required.
+            api_key: Vast.ai API key. If None, loads from .env file.
 
         Raises:
-            ValueError: If api_key is None or empty.
+            ValueError: If api_key cannot be determined or is invalid.
         """
-        if not api_key or not isinstance(api_key, str):
-            raise ValueError("api_key must be a non-empty string")
+        if api_key is None:
+            config = get_vast_ai_config()
+            api_key = config.api_key
+            self.base_url = config.base_url
+            self.timeout = config.timeout
+        else:
+            if not api_key or not isinstance(api_key, str):
+                raise ValueError("api_key must be a non-empty string")
+            self.base_url = "https://api.vast.ai/api/v0"
+            self.timeout = 30
+
         self.api_key = api_key
         self.headers = {
             "Authorization": f"Bearer {api_key}",
@@ -89,9 +97,10 @@ class VastAiClient:
             params["min_vram"] = min_vram
 
         response = requests.get(
-            f"{self.BASE_URL}/search/offers/",
+            f"{self.base_url}/search/offers/",
             headers=self.headers,
             params=params,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         return response.json().get("offers", [])
@@ -152,9 +161,10 @@ class VastAiClient:
             payload["env"] = env
 
         response = requests.put(
-            f"{self.BASE_URL}/asks/{offer_id}/",
+            f"{self.base_url}/asks/{offer_id}/",
             headers=self.headers,
             json=payload,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         data = response.json()
@@ -186,8 +196,9 @@ class VastAiClient:
             raise ValueError("instance_id must be a positive integer")
 
         response = requests.get(
-            f"{self.BASE_URL}/instances/{instance_id}/",
+            f"{self.base_url}/instances/{instance_id}/",
             headers=self.headers,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         data = response.json()
@@ -209,8 +220,9 @@ class VastAiClient:
             requests.RequestException: If API request fails.
         """
         response = requests.get(
-            f"{self.BASE_URL}/instances/",
+            f"{self.base_url}/instances/",
             headers=self.headers,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         instances_data = response.json().get("instances", [])
@@ -234,8 +246,9 @@ class VastAiClient:
             raise ValueError("instance_id must be a positive integer")
 
         response = requests.delete(
-            f"{self.BASE_URL}/instances/{instance_id}/",
+            f"{self.base_url}/instances/{instance_id}/",
             headers=self.headers,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         data = response.json()
@@ -259,8 +272,9 @@ class VastAiClient:
             raise ValueError("instance_id must be a positive integer")
 
         response = requests.post(
-            f"{self.BASE_URL}/instances/{instance_id}/reboot/",
+            f"{self.base_url}/instances/{instance_id}/reboot/",
             headers=self.headers,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         data = response.json()
@@ -288,9 +302,10 @@ class VastAiClient:
 
         payload = {"command": command}
         response = requests.post(
-            f"{self.BASE_URL}/instances/{instance_id}/exec/",
+            f"{self.base_url}/instances/{instance_id}/exec/",
             headers=self.headers,
             json=payload,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         data = response.json()

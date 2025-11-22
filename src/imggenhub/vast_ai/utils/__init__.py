@@ -85,9 +85,9 @@ class CostEstimator:
             Dict with model recommendations
         """
         budget_minutes = (budget_usd / instance_dph) * 60
-        budget_images_flux_schnell = int(budget_minutes / 0.5)  # ~30 sec per image
-        budget_images_sd35 = int(budget_minutes / 1.0)  # ~60 sec per image
-        budget_images_flux_pro = int(budget_minutes / 1.5)  # ~90 sec per image
+        budget_images_flux_schnell = int(budget_minutes / 0.5)
+        budget_images_sd35 = int(budget_minutes / 1.0)
+        budget_images_flux_pro = int(budget_minutes / 1.5)
 
         return {
             'budget_usd': budget_usd,
@@ -131,7 +131,7 @@ class RunLogger:
     def __init__(self, output_dir: Optional[Path] = None):
         self.output_dir = output_dir or Path("output")
         self.output_dir.mkdir(exist_ok=True)
-        self.runs: list[Dict[str, Any]] = []
+        self.runs: list = []
 
     def log_run(
         self,
@@ -142,7 +142,7 @@ class RunLogger:
         num_images: int,
         duration_seconds: float,
         status: str = "completed",
-        notes: str = None,
+        notes: Optional[str] = None,
     ) -> None:
         """
         Log a single GPU run.
@@ -246,7 +246,7 @@ class InstanceManager:
     """Manage instance lifecycle and ensure proper cleanup."""
 
     def __init__(self, client):
-        """Initialize with a VastAIClient instance."""
+        """Initialize with a VastAiClient instance."""
         self.client = client
         self.active_instances: Dict[str, Dict[str, Any]] = {}
 
@@ -310,7 +310,7 @@ class InstanceManager:
             'estimated_cost': instance_dph * duration_hours,
         }
 
-    def get_active_instances(self) -> list[Dict[str, Any]]:
+    def get_active_instances(self) -> list:
         """Get list of all active tracked instances."""
         return [
             {

@@ -1,19 +1,18 @@
 """CLI interface for Vast.ai remote execution."""
 import argparse
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
-from imggenhub.vast_ai.client import VastAiClient
-from imggenhub.vast_ai.executor import RemoteExecutor
+from imggenhub.vast_ai.api import VastAiClient
+from imggenhub.vast_ai.orchestration import RemoteExecutor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def run_remote_pipeline(
-    api_key: str,
+    api_key: Optional[str],
     instance_id: int,
     model_name: str,
     guidance: float,
@@ -35,7 +34,7 @@ def run_remote_pipeline(
     Execute image generation pipeline on a remote Vast.ai instance.
 
     Args:
-        api_key: Vast.ai API key. Required.
+        api_key: Vast.ai API key. If None, loads from .env.
         instance_id: Vast.ai instance ID to use. Required.
         model_name: Base model to use. Required.
         guidance: Guidance scale. Required.
@@ -60,8 +59,6 @@ def run_remote_pipeline(
         ValueError: If required parameters are missing.
         RuntimeError: If execution fails.
     """
-    if not api_key or not isinstance(api_key, str):
-        raise ValueError("api_key is required")
     if not isinstance(instance_id, int) or instance_id <= 0:
         raise ValueError("instance_id must be a positive integer")
 
@@ -149,7 +146,7 @@ def run_remote_pipeline(
 def main():
     """CLI entry point for Vast.ai remote execution."""
     parser = argparse.ArgumentParser(description="Run image generation pipeline on Vast.ai GPU")
-    parser.add_argument("--api_key", type=str, required=True, help="Vast.ai API key")
+    parser.add_argument("--api_key", type=str, default=None, help="Vast.ai API key (loads from .env if not provided)")
     parser.add_argument("--instance_id", type=int, required=True, help="Vast.ai instance ID")
     parser.add_argument("--model_name", type=str, required=True, help="Model to use for image generation")
     parser.add_argument("--guidance", type=float, required=True, help="Guidance scale (7-12 recommended)")

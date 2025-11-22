@@ -2,10 +2,7 @@
 import logging
 from pathlib import Path
 from typing import Optional, Tuple
-from datetime import datetime
-import json
-
-from imggenhub.vast_ai.client import VastAiClient, VastInstance
+from imggenhub.vast_ai.api import VastAiClient, VastInstance
 from imggenhub.vast_ai.ssh import SSHClient
 
 logger = logging.getLogger(__name__)
@@ -14,25 +11,22 @@ logger = logging.getLogger(__name__)
 class RemoteExecutor:
     """Manages remote execution of image generation pipeline on Vast.ai instances."""
 
-    def __init__(self, api_key: str, instance: VastInstance, ssh_private_key: Optional[str] = None, ssh_password: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, instance: Optional[VastInstance] = None, ssh_private_key: Optional[str] = None, ssh_password: Optional[str] = None):
         """
         Initialize remote executor.
 
         Args:
-            api_key: Vast.ai API key. Required.
+            api_key: Vast.ai API key. If None, loads from .env. Optional.
             instance: VastInstance object with connection details. Required.
             ssh_private_key: Path to SSH private key. Optional if using password.
             ssh_password: SSH password. Optional if using private key.
 
         Raises:
-            ValueError: If required parameters are missing.
+            ValueError: If instance is missing or invalid.
         """
-        if not api_key or not isinstance(api_key, str):
-            raise ValueError("api_key must be a non-empty string")
         if not instance:
             raise ValueError("instance must be a VastInstance object")
 
-        self.api_key = api_key
         self.instance = instance
         self.ssh_client = SSHClient(
             host=instance.ssh_host,
@@ -43,9 +37,12 @@ class RemoteExecutor:
         )
         self.vast_client = VastAiClient(api_key)
 
-    def setup_environment(self) -> None:
+    def setup_environment(self, setup_script_path: Optional[str] = None) -> None:
         """
         Setup Python environment on remote instance.
+
+        Args:
+            setup_script_path: Path to setup script. If None, looks in package. Optional.
 
         Raises:
             RuntimeError: If setup fails.
@@ -58,11 +55,14 @@ class RemoteExecutor:
             # Create workspace directory
             self.ssh_client.execute("mkdir -p /workspace")
 
-            # Update system and install dependencies
+            # Upload and run setup script
             logger.info("Installing system dependencies...")
-            setup_script = Path(__file__).parent / "setup.sh"
+            if setup_script_path is None:
+                setup_script_path = str(Path(__file__).parent.parent / "deploy" / "setup.sh")
+
+            setup_script = Path(setup_script_path)
             if not setup_script.exists():
-                raise FileNotFoundError(f"Setup script not found: {setup_script}")
+                raise FileNotFoundError(f"Setup script not found: {setup_script_path}")
 
             self.ssh_client.upload_file(str(setup_script), "/tmp/setup.sh")
             exit_code, stdout, stderr = self.ssh_client.execute("bash /tmp/setup.sh")
@@ -157,7 +157,7 @@ class RemoteExecutor:
             self.ssh_client.connect()
 
             # Navigate to repo and install dependencies
-            command = f"cd {remote_repo_path} && poetry install --no-dev"
+            command = f"cd {remote_repo_path} && poetry install"
             exit_code, stdout, stderr = self.ssh_client.execute(command)
 
             if exit_code != 0:
