@@ -58,6 +58,11 @@ class VastAiConfig:
             ValueError: If variable is not set or empty.
         """
         value = os.getenv(key)
+        
+        # Try alternate naming for VAST_AI_API_KEY
+        if not value and key == "VAST_AI_API_KEY":
+            value = os.getenv("VASTAI_API_KEY")
+        
         if not value or not value.strip():
             raise ValueError(
                 f"Required environment variable '{key}' is not set. "
