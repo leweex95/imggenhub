@@ -1,13 +1,19 @@
 {
   "id": "leventecsibi/stable-diffusion-batch-generator",
   "title": "Stable Diffusion Batch Generator",
-  "code_file": "kaggle-notebook-flux-gguf-generation.ipynb",
+  "code_file": "kaggle-flux-gguf.ipynb",
   "language": "python",
   "kernel_type": "notebook",
   "is_private": "true",
   "enable_gpu": "true",
   "enable_internet": "true",
-  "dataset_sources": [],
+  "dataset_sources": [
+    "leventecsibi/flux1-schnell-q4-zip",
+    "leventecsibi/vae-zip",
+    "leventecsibi/clip-l-zip",
+    "leventecsibi/t5xxl-zip",
+    "leventecsibi/sd-build-zip"
+  ],
   "model_sources": [],
   "metadata": {
     "kernelspec": {

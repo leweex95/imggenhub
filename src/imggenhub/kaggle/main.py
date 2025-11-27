@@ -13,7 +13,7 @@ from imggenhub.kaggle.utils.auto_precision import AutoPrecisionDetector
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_name=None, refiner_model_name=None, prompt=None, prompts=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None):
+def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_name=None, refiner_model_name=None, prompt=None, prompts=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None, img_size=None):
     """Run Kaggle image generation pipeline: deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
     cwd = Path(__file__).parent
@@ -58,6 +58,7 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         refiner_precision=refiner_precision,
         refiner_negative_prompt=refiner_negative_prompt,
         hf_token=hf_token,
+        img_size=img_size,
     )
     logging.debug("Deploy step completed")
 
@@ -89,7 +90,7 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Kaggle image generation pipeline")
     parser.add_argument("--prompts_file", type=str, default="./config/prompts.json")
-    parser.add_argument("--notebook", type=str, default="./config/kaggle-notebook-image-generation.ipynb")
+    parser.add_argument("--notebook", type=str, default=None, help="Notebook to use (auto-detects based on model if not specified)")
     parser.add_argument("--kernel_path", type=str, default="./config")
     parser.add_argument("--gpu", action="store_true", help="Enable GPU for the kernel")
     parser.add_argument("--dest", type=str, default="output_images")
@@ -99,28 +100,118 @@ def main():
     parser.add_argument("--prompts", type=str, nargs="+", default=None, help="Multiple prompts")
     parser.add_argument("--guidance", type=float, required=True, help="Guidance scale (7-12 recommended for photorealism)")
     parser.add_argument("--steps", type=int, required=True, help="Number of inference steps (50-100 for better quality)")
-    parser.add_argument("--precision", type=str, choices=["fp32", "fp16", "int8", "int4", "auto"],
-                        default="auto", help="Precision level: fp32 (highest quality), fp16 (balanced), int8 (faster), int4 (fastest), auto (detect optimal)")
+    parser.add_argument("--precision", type=str, choices=["fp32", "fp16", "bf16", "int8", "int4", "q4", "auto"],
+                        default="auto", help="Precision level: fp32 (highest quality), fp16 (balanced), bf16 (recommended for Flux), q4 (GGUF quantized), int8 (faster), int4 (fastest), auto (detect optimal)")
     parser.add_argument("--negative_prompt", type=str, default=None, help="Custom negative prompt for better quality control")
     parser.add_argument("--two_stage_refiner", action="store_true", help="Use two-stage approach: base model → unload VRAM → refiner model (saves VRAM)")
     parser.add_argument("--refiner_guidance", type=float, default=None, help="Guidance scale for refiner (REQUIRED when using --refiner_model_name)")
     parser.add_argument("--refiner_steps", type=int, default=None, help="Number of inference steps for refiner (REQUIRED when using --refiner_model_name)")
-    parser.add_argument("--refiner_precision", type=str, default=None, choices=["fp32", "fp16", "int8", "int4"],
+    parser.add_argument("--refiner_precision", type=str, default=None, choices=["fp32", "fp16", "bf16", "int8", "int4"],
                         help="Precision level for refiner (defaults to same as --precision)")
     parser.add_argument("--refiner_negative_prompt", type=str, default=None, help="Custom negative prompt for refiner (defaults to same as --negative_prompt)")
     parser.add_argument("--hf_token", type=str, default=None, help="HuggingFace API token for accessing gated models (e.g., FLUX.1-schnell)")
+    parser.add_argument("--img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
+    parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
 
     args = parser.parse_args()
+
+    # Load HF_TOKEN from .env file if not provided via CLI
+    if not args.hf_token:
+        import os
+        from pathlib import Path
+        import sys
+        
+        # Try to load from .env in the project root
+        env_path = Path(__file__).parent.parent.parent.parent / ".env"
+        if env_path.exists():
+            from dotenv import load_dotenv
+            load_dotenv(env_path)
+            args.hf_token = os.getenv("HF_TOKEN")
+            if args.hf_token:
+                print(f"[INFO] Loaded HF_TOKEN from .env file")
+        else:
+            # Try to load from current working directory
+            try:
+                from dotenv import load_dotenv
+                load_dotenv()
+                args.hf_token = os.getenv("HF_TOKEN")
+                if args.hf_token:
+                    print(f"[INFO] Loaded HF_TOKEN from .env in current directory")
+            except:
+                pass
+
+    # Auto-detect notebook based on model type if not specified
+    if args.notebook is None:
+        if args.model_name and _is_flux_gguf_model(args.model_name):
+            args.notebook = "./config/kaggle-flux-gguf.ipynb"
+            print(f"Auto-detected FLUX GGUF model, using notebook: {args.notebook}")
+            
+            # Enforce GPU for FLUX GGUF models
+            if not args.gpu:
+                print("\n" + "="*80)
+                print("WARNING: FLUX GGUF Q4 MODELS REQUIRE GPU!")
+                print("="*80)
+                print("You did NOT specify --gpu flag.")
+                print("FLUX GGUF Q4 models cannot run on CPU (too slow and memory-intensive).")
+                print("Automatically enabling GPU mode...")
+                print("="*80 + "\n")
+                args.gpu = True
+        else:
+            args.notebook = "./config/kaggle-stable-diffusion.ipynb"
+            print(f"Using default notebook: {args.notebook}")
+
+    # Validate required image dimensions - NO DEFAULTS ALLOWED
+    if not args.img_width or not args.img_height:
+        print("\n" + "="*80)
+        print("⚠️  VALIDATION ERROR: MISSING IMAGE DIMENSIONS!")
+        print("="*80)
+        print("Both --img_width and --img_height are REQUIRED.")
+        print("Please specify explicit image dimensions.")
+        print("Examples:")
+        print("  - Stable Diffusion XL: --img_width 1024 --img_height 1024")
+        print("  - FLUX GGUF Q4: --img_width 512 --img_height 512")
+        print("="*80 + "\n")
+        return
+    
+    # Validate FLUX model dimensions must be multiples of 16
+    if args.model_name and _is_flux_gguf_model(args.model_name):
+        if args.img_width % 16 != 0 or args.img_height % 16 != 0:
+            print("\n" + "="*80)
+            print("⚠️  VALIDATION ERROR: INVALID FLUX IMAGE DIMENSIONS!")
+            print("="*80)
+            print(f"FLUX models require dimensions to be multiples of 16.")
+            print(f"You provided: {args.img_width}x{args.img_height}")
+            print(f"Valid dimensions close to your request:")
+            # Suggest nearest valid dimensions
+            valid_width = (args.img_width // 16) * 16
+            valid_height = (args.img_height // 16) * 16
+            print(f"  - {valid_width}x{valid_height}")
+            print(f"Common FLUX dimensions:")
+            print(f"  - 512x512 (fast)")
+            print(f"  - 768x768 (balanced)")
+            print(f"  - 1024x1024 (high quality)")
+            print(f"  - 1920x1088 (full HD, multiple of 16)")
+            print("="*80 + "\n")
+            return
+    
+    img_size = (args.img_height, args.img_width)
 
     # Auto-detect precision if requested
     if args.precision == "auto":
         if not args.model_name:
             print("Error: --model_name is required when using --precision auto")
             return
-        if _is_kaggle_model(args.model_name):
+        if _is_flux_gguf_model(args.model_name):
+            args.precision = "q4"
+            print(f"Using default precision 'q4' for FLUX GGUF model: {args.model_name}")
+        elif _is_kaggle_model(args.model_name):
             # For Kaggle models, use fp16 as default (most common for FLUX)
             args.precision = "fp16"
             print(f"Using default precision 'fp16' for Kaggle model: {args.model_name}")
+        elif "flux" in args.model_name.lower():
+            # FLUX models work best with bfloat16
+            args.precision = "bf16"
+            print(f"Using default precision 'bf16' for FLUX model: {args.model_name}")
         else:
             print(f"Auto-detecting optimal precision for {args.model_name}...")
             detected_precision, _ = auto_detect_precision(args.model_name, args.hf_token)
@@ -152,32 +243,67 @@ def main():
         refiner_steps=args.refiner_steps,
         refiner_precision=args.refiner_precision,
         refiner_negative_prompt=args.refiner_negative_prompt,
-        hf_token=args.hf_token
+        hf_token=args.hf_token,
+        img_size=img_size
     )
 
 
 def _validate_args(args):
-    """Validate command line arguments"""
-    # Automatically enable refiner if refiner_model_name is specified
-    use_refiner = (args.refiner_model_name is not None)
-
-    # Validate compulsory parameters before any deployment
-    if args.steps is None:
-        raise ValueError("--steps is required")
-    if args.guidance is None:
-        raise ValueError("--guidance is required")
-    if args.precision is None:
-        raise ValueError("--precision is required")
-
+    """Validate command line arguments with loud warnings for any fallbacks"""
+    
     # Validate model name is provided
     if not args.model_name:
+        print("="*80)
+        print("[ERROR] --model_name is required")
+        print("[ERROR] Example: --model_name flux-gguf-q4")
+        print("="*80)
         raise ValueError("--model_name is required")
+    
+    # Validate prompts are provided
+    if not args.prompt and not args.prompts and not args.prompts_file:
+        print("="*80)
+        print("[ERROR] No prompts provided")
+        print("[ERROR] Specify at least one of:")
+        print("[ERROR]   --prompt \"your prompt\"")
+        print("[ERROR]   --prompts \"prompt1\" \"prompt2\"")
+        print("[ERROR]   --prompts_file path/to/prompts.txt")
+        print("="*80)
+        raise ValueError("No prompts provided")
+    
+    # Validate compulsory parameters before any deployment
+    if args.steps is None:
+        print("="*80)
+        print("[ERROR] --steps is required")
+        print("[ERROR] Example: --steps 4")
+        print("="*80)
+        raise ValueError("--steps is required")
+    
+    if args.guidance is None:
+        print("="*80)
+        print("[ERROR] --guidance is required")
+        print("[ERROR] Example: --guidance 1.0")
+        print("="*80)
+        raise ValueError("--guidance is required")
+    
+    if args.precision is None:
+        print("="*80)
+        print("[ERROR] --precision is required")
+        print("[ERROR] Example: --precision q4")
+        print("[ERROR] Available: fp16, fp32, q4, q8")
+        print("="*80)
+        raise ValueError("--precision is required")
+
+    # Automatically enable refiner if refiner_model_name is specified
+    use_refiner = (args.refiner_model_name is not None)
 
     # Validate precision availability for base model
     if args.precision != "auto":  # Skip if auto-detected (already validated)
         # Skip validation for Kaggle models (not on HuggingFace)
         if _is_kaggle_model(args.model_name):
             print(f"Skipping precision validation for Kaggle model: {args.model_name}")
+        # Skip validation for FLUX models - they support all precisions via torch_dtype
+        elif "flux" in args.model_name.lower():
+            print(f"Skipping precision validation for FLUX model (supports all precisions): {args.model_name}")
         else:
             print(f"Validating precision '{args.precision}' availability for {args.model_name}...")
             detector = AutoPrecisionDetector(args.hf_token)
@@ -242,6 +368,17 @@ def _is_kaggle_model(model_id: str) -> bool:
     
     # If owner is not a known HF org, assume it's a Kaggle model
     return owner not in hf_orgs
+
+
+def _is_flux_gguf_model(model_id: str) -> bool:
+    """
+    Check if a model ID refers to a FLUX GGUF model.
+    These are quantized FLUX models in GGUF format.
+    """
+    if not model_id:
+        return False
+    model_lower = model_id.lower()
+    return ('flux' in model_lower and ('gguf' in model_lower or 'q4' in model_lower or 'q8' in model_lower))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "imggenhub"
-version = "1.3.0"
+version = "1.4.0"
 description = ""
 authors = ["leweex95 <csibi.levente14@gmail.com>"]
 readme = "README.md"
@@ -16,12 +16,14 @@ kaggle = ">=1.7.4.5,<2.0.0.0"
 accelerate = "^1.11.0"
 sentencepiece = "^0.2.1"
 hf-xet = "^1.2.0"
+python-dotenv = "^1.0.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
+imggenhub = "imggenhub.kaggle.main:main"
 test = "pytest:main"
 
 [dependency-groups]

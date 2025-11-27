@@ -14,14 +14,9 @@ ImgGenHub is a personal image generation hub that connects to web-based image ge
 
 #### **Kaggle-powered image generation**
 - **Automated pipeline**: Deploy → Monitor → Download workflow
-- **GPU/CPU support**: Configurable hardware acceleration via Kaggle's free T4×2 GPUs (30 hours/week)
-- **Multiple models**: Support for popular Stable Diffusion variants
+- **GPU/CPU support**: Configurable hardware acceleration via Kaggle's free GPUs (30 hours/week)
+- **Multiple models**: Support for popular Stable Diffusion variants and Flux.1-schnell quantized (Q4) version
 - **Flexible prompting**: Command-line prompts or JSON file batch processing
-
-#### **GitHub Actions automation**
-- **On-Demand generation**: Manual workflow triggers with custom parameters
-- **Automated testing**: Daily regression tests to ensure pipeline stability
-- **Email notifications**: Success/failure alerts with generation details
 
 ---
 
@@ -40,7 +35,7 @@ ImgGenHub is a personal image generation hub that connects to web-based image ge
 
 #### **Simple single prompt**
 ```bash
-poetry run python -m imggenhub.kaggle.main \
+poetry run imggenhub \
   --model_name stabilityai/stable-diffusion-xl-base-1.0 \
   --refiner_model_name stabilityai/stable-diffusion-xl-refiner-1.0 \
   --gpu \
@@ -50,9 +45,9 @@ poetry run python -m imggenhub.kaggle.main \
   --precision fp16 --refiner_precision fp16 --two_stage_refiner
 ```
 
-#### **Advanced photorealistic generation (tested & working)**
+#### **Advanced photorealistic generation**
 ```bash
-poetry run python -m imggenhub.kaggle.main \
+poetry run imggenhub \
   --gpu \
   --model_name "stabilityai/stable-diffusion-xl-base-1.0" \
   --prompt "A highly detailed photorealistic portrait of a young woman with long flowing hair, professional studio lighting, sharp focus on eyes, cinematic composition, 8K resolution, masterpiece quality" \
@@ -64,27 +59,31 @@ poetry run python -m imggenhub.kaggle.main \
 ```
 *Output will be saved to: `output/photorealistic_portrait_YYYYMMDD_HHMMSS/`*
 
-#### **Available CLI options**
+#### **FLUX.1-schnell Q4 GGUF quantized generation**
+FLUX GGUF uses quantized models for faster generation with lower memory requirements:
+
 ```bash
-poetry run python -m imggenhub.kaggle.main --help
+poetry run imggenhub \
+  --model_name "flux-gguf-q4" \
+  --prompt "A beautiful landscape with mountains and a lake, photorealistic, high detail, cinematic lighting" \
+  --guidance 3.5 \
+  --steps 4 \
+  --precision q4 \
+  --img_width 1024 \
+  --img_height 1024
 ```
 
-#### **Output directory structure**
-All generated images and logs are automatically organized in timestamped subfolders under the `output/` directory:
+**FLUX GGUF Features:**
+- **Automatic GPU enforcement**: CPU mode not supported (too slow)
+- **Quantized Q4 model**: Reduced memory footprint
+- **Fast generation**: 4 steps typical
+- **Default image size**: 1024x1024 (customizable via `--img_width` and `--img_height`)
+- **Model sources**: Supports both Kaggle datasets (default) and direct HuggingFace download
+  - Set `MODEL_SOURCE=huggingface` and `HF_TOKEN=your_token` in `.env` for HF downloads
 
-```
-output/
-├── final_working_test_20251114_121500/  # --dest "final_working_test" + timestamp
-│   ├── generated_images/                 # Images from the notebook
-│   ├── kaggle_cli_stdout.log            # Kaggle CLI output logs
-│   ├── kaggle_cli_stderr.log            # Kaggle CLI error logs
-│   └── stable-diffusion-batch-generator.log  # Kernel execution logs (if any)
-└── 20251114_121600/                     # Default timestamp-only naming
-    ├── generated_images/
-    └── ...
-```
+*Output will be saved to: `output/output_images_YYYYMMDD_HHMMSS/` or custom destination with `--dest`*
 
-**Key parameters:**
+#### **All supported flags**
 - `--dest DEST`: Custom name prefix for the output folder (default: timestamp only)
 - Outputs are always saved under `output/` with automatic timestamping
 - All logs from the generation process are saved in the same folder as the images
@@ -104,3 +103,9 @@ output/
 - `--refiner_negative_prompt`: Negative prompt for refiner (defaults to same as --negative_prompt)
 - `--notebook`: Custom notebook path
 - `--kernel_path`: Kaggle kernel configuration directory
+
+## Custom Kaggle datasets
+
+To speed up inference, we upload the largest model files as a custom Kaggle dataset. This massively speeds up model inference as there is no need to fetch tens of GBs before every inference run.
+
+Note: temporarily switched off as we found that for FLUX.1-schnell models (and hence, likely for any large model) it actually takes more time to read these models from Kaggle datasets inside of a Kaggle notebook than downloading directly from Hugging Face.

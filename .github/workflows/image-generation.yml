@@ -237,7 +237,7 @@ jobs:
             ARGS="$ARGS --negative_prompt \"$NEGATIVE_PROMPT\""
           fi
           
-          echo "Running: python -m imggenhub.kaggle.main $ARGS"
+          echo "Running: imggenhub $ARGS"
           echo ""
           
           # Run the full pipeline (deploy -> poll -> download)
@@ -333,7 +333,7 @@ jobs:
             $ARGS += " --negative_prompt `"$env:NEGATIVE_PROMPT`""
           }
           
-          echo "Running: python -m imggenhub.kaggle.main $ARGS"
+          echo "Running: imggenhub $ARGS"
           echo ""
           
           # Run the full pipeline (deploy -> poll -> download)

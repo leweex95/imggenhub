@@ -7,7 +7,34 @@ import shutil
 import logging
 
 
-def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None):
+def _update_param(source_lines, param_name, value, is_list=False):
+    """
+    Update a parameter in notebook source code lines.
+    
+    Args:
+        source_lines: List of source code lines
+        param_name: Name of parameter (e.g., "PROMPTS", "MODEL_ID")
+        value: New value
+        is_list: True if value should be formatted as Python list
+    
+    Returns:
+        Updated source lines
+    """
+    for i, line in enumerate(source_lines):
+        if line.strip().startswith(f"{param_name} ="):
+            if is_list:
+                source_lines[i] = f"{param_name} = {value}\n"
+            elif isinstance(value, str):
+                source_lines[i] = f"{param_name} = \"{value}\"\n"
+            elif isinstance(value, bool):
+                source_lines[i] = f"{param_name} = {value}\n"
+            else:
+                source_lines[i] = f"{param_name} = {value}\n"
+            break
+    return source_lines
+
+
+def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None, img_size=None):
     """
     Deploy Kaggle notebook kernel, optionally overriding prompts and model.
     Uses the specified notebook; user is responsible for matching notebook to model.
@@ -22,112 +49,101 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     with open(nb_path, "r", encoding="utf-8") as f:
         nb = json.load(f)
 
-    # Update parameters in notebook
-    # Skip parameter updates for FLUX notebook to avoid breaking JSON indentation
-    if "flux" not in str(notebook).lower():
-        for cell in nb["cells"]:
-            if cell["cell_type"] == "code":
-                # Update PROMPTS
-                for i, line in enumerate(cell["source"]):
-                    if line.strip().startswith("PROMPTS ="):
-                        cell["source"][i] = f"PROMPTS = {prompts_list}\n"
-                        break
-                # Update MODEL_ID if provided
-                if model_id:
-                    for i, line in enumerate(cell["source"]):
-                        if "MODEL_ID =" in line:
-                            cell["source"][i] = f"MODEL_ID = \"{model_id}\"\n"
-                            break
-                # Update REFINER_MODEL_ID if provided
-                if refiner_model_id:
-                    for i, line in enumerate(cell["source"]):
-                        if "REFINER_MODEL_ID =" in line:
-                            cell["source"][i] = f"REFINER_MODEL_ID = \"{refiner_model_id}\"\n"
-                            break
-                # Update GUIDANCE if provided
-                if guidance is not None:
-                    for i, line in enumerate(cell["source"]):
-                        if "GUIDANCE =" in line:
-                            cell["source"][i] = f"GUIDANCE = {guidance}\n"
-                            break
-                # Update STEPS if provided
-                if steps is not None:
-                    for i, line in enumerate(cell["source"]):
-                        if "STEPS =" in line:
-                            cell["source"][i] = f"STEPS = {steps}\n"
-                            break
-                # Update USE_REFINER based on whether a refiner model is provided
-                # (No assumptions about model compatibility; let the pipeline handle it)
-                use_refiner = refiner_model_id is not None
-                for i, line in enumerate(cell["source"]):
-                    if "USE_REFINER =" in line:
-                        cell["source"][i] = f"USE_REFINER = {use_refiner}\n"
-                        break
-                # Update PRECISION if provided
-                if precision:
-                    for i, line in enumerate(cell["source"]):
-                        if "PRECISION =" in line:
-                            cell["source"][i] = f"PRECISION = \"{precision}\"\n"
-                            break
-                # Update NEGATIVE_PROMPT if provided
-                if negative_prompt:
-                    for i, line in enumerate(cell["source"]):
-                        if "NEGATIVE_PROMPT =" in line:
-                            cell["source"][i] = f"NEGATIVE_PROMPT = \"{negative_prompt}\"\n"
-                            break
-                # Update OUTPUT_DIR if provided
-                if output_dir:
-                    for i, line in enumerate(cell["source"]):
-                        if "OUTPUT_DIR =" in line:
-                            # Use forward slashes (cross-platform compatible for Kaggle Linux)
-                            # Write only the output folder name (basename) so the notebook
-                            # can prepend 'output/' if desired and avoid nested paths.
-                            output_dir_unix = str(output_dir).replace("\\", "/")
-                            output_basename = os.path.basename(output_dir_unix)
-                            cell["source"][i] = f"OUTPUT_DIR = \"{output_basename}\"\n"
-                            break
-                # Update TWO_STAGE_REFINER if provided
-                for i, line in enumerate(cell["source"]):
-                    if "TWO_STAGE_REFINER =" in line:
-                        cell["source"][i] = f"TWO_STAGE_REFINER = {two_stage_refiner}\n"
-                        break
-                # Update REFINER_GUIDANCE if provided
-                if refiner_guidance is not None:
-                    for i, line in enumerate(cell["source"]):
-                        if "REFINER_GUIDANCE =" in line:
-                            cell["source"][i] = f"REFINER_GUIDANCE = {refiner_guidance}\n"
-                            break
-                # Update REFINER_STEPS if provided
-                if refiner_steps is not None:
-                    for i, line in enumerate(cell["source"]):
-                        if "REFINER_STEPS =" in line:
-                            cell["source"][i] = f"REFINER_STEPS = {refiner_steps}\n"
-                            break
-                # Update REFINER_PRECISION if provided
-                if refiner_precision:
-                    for i, line in enumerate(cell["source"]):
-                        if "REFINER_PRECISION =" in line:
-                            cell["source"][i] = f"REFINER_PRECISION = \"{refiner_precision}\"\n"
-                            break
-                # Update REFINER_NEGATIVE_PROMPT if provided
-                if refiner_negative_prompt:
-                    for i, line in enumerate(cell["source"]):
-                        if "REFINER_NEGATIVE_PROMPT =" in line:
-                            cell["source"][i] = f"REFINER_NEGATIVE_PROMPT = \"{refiner_negative_prompt}\"\n"
-                            break
-                # Update HF_TOKEN if provided
-                if hf_token:
-                    for i, line in enumerate(cell["source"]):
-                        if "HF_TOKEN =" in line:
-                            cell["source"][i] = f"HF_TOKEN = \"{hf_token}\"\n"
-                            break
-    else:
-        logging.info(f"Skipping parameter updates for FLUX notebook to prevent indentation issues")
+    # Detect notebook type
+    is_flux_notebook = "flux" in str(notebook).lower()
+    is_flux_gguf_notebook = "flux-gguf" in str(notebook).lower()
 
-    # Save updated notebook (only if we modified it)
-    if "flux" not in str(notebook).lower():
-        with open(nb_path, "w", encoding="utf-8") as f:
-            json.dump(nb, f, indent=2)
+    # For FLUX notebooks, inject dataset download code
+    if is_flux_notebook and not is_flux_gguf_notebook:
+        # Add dataset download cell after the first cell (imports/installs)
+        dataset_download_cell = {
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# Download FLUX text encoder parts from Kaggle dataset\n",
+                "import kagglehub\n",
+                "print(\"Downloading FLUX text encoder model parts...\")\n",
+                "dataset_path = kagglehub.dataset_download(\"leventecsibi/flux-1-schnell-text-encoder-parts\")\n",
+                "print(f\"Dataset downloaded to: {dataset_path}\")\n",
+                "\n",
+                "# Set up model paths for local loading\n",
+                "import os\n",
+                "text_encoder_2_path = os.path.join(dataset_path, \"model_part_1.safetensors\")\n",
+                "text_encoder_2_path_2 = os.path.join(dataset_path, \"model_part_2.safetensors\")\n",
+                "print(f\"Text encoder parts: {text_encoder_2_path}, {text_encoder_2_path_2}\")\n"
+            ]
+        }
+        nb["cells"].insert(1, dataset_download_cell)
+
+    for cell in nb["cells"]:
+        if cell["cell_type"] == "code":
+            source = cell["source"] if isinstance(cell["source"], list) else [cell["source"]]
+
+            # Update parameters only if provided by user (no silent overrides)
+            if prompts_list:
+                source = _update_param(source, "PROMPTS", prompts_list, is_list=True)
+            if model_id:
+                source = _update_param(source, "MODEL_ID", model_id)
+            if guidance is not None:
+                source = _update_param(source, "GUIDANCE", guidance)
+            if steps is not None:
+                source = _update_param(source, "STEPS", steps)
+            if precision:
+                source = _update_param(source, "PRECISION", precision)
+            # Don't override OUTPUT_DIR - use notebook's default "output_images" to avoid folder duplication
+            # The timestamp folder is created on the local machine, not in the notebook
+            if img_size:
+                source = _update_param(source, "IMG_SIZE", img_size)
+
+            # For FLUX notebooks, modify model loading to use local text encoder
+            if is_flux_notebook and not is_flux_gguf_notebook and "FluxPipeline.from_pretrained" in "".join(source):
+                # Replace the model loading with custom loading using local text encoder
+                source = [line.replace(
+                    'pipe = FluxPipeline.from_pretrained(MODEL_ID, torch_dtype=torch_dtype)',
+                    'pipe = FluxPipeline.from_pretrained(\n'
+                    '    MODEL_ID, \n'
+                    '    torch_dtype=torch_dtype,\n'
+                    '    text_encoder_2_kwargs={"variant": "fp16"},\n'
+                    '    vae_kwargs={"variant": "fp16"}\n'
+                    ')\n'
+                    '# Load text encoder from local files\n'
+                    'from safetensors.torch import load_file\n'
+                    'print("Loading text encoder from local files...")\n'
+                    'text_encoder_state = {}\n'
+                    'text_encoder_state.update(load_file(text_encoder_2_path))\n'
+                    'text_encoder_state.update(load_file(text_encoder_2_path_2))\n'
+                    'pipe.text_encoder_2.load_state_dict(text_encoder_state, strict=False)\n'
+                    'print("Text encoder loaded from local files")'
+                ) for line in source]
+
+            # Pass HF_TOKEN to all notebooks that need it (FLUX GGUF and standard models)
+            if hf_token:
+                source = _update_param(source, "HF_TOKEN", hf_token)
+            
+            # Non-Flux specific parameters (refiner, negative prompts, etc.)
+            if not is_flux_notebook and not is_flux_gguf_notebook:
+                if refiner_model_id:
+                    source = _update_param(source, "REFINER_MODEL_ID", refiner_model_id)
+                if negative_prompt:
+                    source = _update_param(source, "NEGATIVE_PROMPT", negative_prompt)
+                if two_stage_refiner:
+                    source = _update_param(source, "TWO_STAGE_REFINER", two_stage_refiner)
+                if refiner_guidance is not None:
+                    source = _update_param(source, "REFINER_GUIDANCE", refiner_guidance)
+                if refiner_steps is not None:
+                    source = _update_param(source, "REFINER_STEPS", refiner_steps)
+                if refiner_precision:
+                    source = _update_param(source, "REFINER_PRECISION", refiner_precision)
+                if refiner_negative_prompt:
+                    source = _update_param(source, "REFINER_NEGATIVE_PROMPT", refiner_negative_prompt)
+            
+            cell["source"] = source
+
+    # Save updated notebook
+    with open(nb_path, "w", encoding="utf-8") as f:
+        json.dump(nb, f, indent=2)
 
     # Update kernel metadata
     metadata_path = Path(kernel_path) / "kernel-metadata.json"
@@ -162,8 +178,32 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     
     if gpu is not None:
         kernel_meta["enable_gpu"] = str(gpu).lower()
+    
     # Update code_file to point to the correct notebook
     kernel_meta["code_file"] = notebook.name
+    
+    # Dynamic dataset_sources: only attach datasets if MODEL_SOURCE is "dataset"
+    # This saves GPU startup time when using HuggingFace downloads
+    model_source = os.environ.get("MODEL_SOURCE", "dataset").lower()
+    if is_flux_gguf_notebook:
+        if model_source == "dataset":
+            # Attach FLUX GGUF datasets
+            kernel_meta["dataset_sources"] = [
+                "leventecsibi/flux1-schnell-q4-zip",
+                "leventecsibi/vae-zip",
+                "leventecsibi/clip-l-zip",
+                "leventecsibi/t5xxl-zip",
+                "leventecsibi/sd-build-zip"
+            ]
+            print("[INFO] Using dataset source for FLUX GGUF model - datasets attached")
+        else:
+            # Empty dataset sources when using HuggingFace
+            kernel_meta["dataset_sources"] = []
+            print("="*80)
+            print("[WARNING] Using HuggingFace source for FLUX GGUF model")
+            print("[WARNING] No datasets attached - models will be downloaded from HuggingFace Hub")
+            print("[WARNING] This may increase kernel startup time")
+            print("="*80)
     logging.info(f"Updated kernel metadata to use notebook: {notebook}")
     
     with open(metadata_path, "w", encoding="utf-8") as f:
@@ -181,7 +221,7 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
             f"  Metadata file: {metadata_path}"
         )
     
-    logging.info(f"✓ VERIFIED: Metadata correctly updated from '{original_code_file}' to '{notebook.name}'")
+    logging.info(f" VERIFIED: Metadata correctly updated from '{original_code_file}' to '{notebook.name}'")
     
     # Push via Kaggle CLI - try Poetry first, fallback to direct python
     kaggle_cmd = _get_kaggle_command()
