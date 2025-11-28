@@ -4,10 +4,47 @@ from pathlib import Path
 import logging
 import shutil
 import os
+import sys
+import time
+from typing import List
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
 KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
+
+# Monitoring configuration (tunable for tests)
+DOWNLOAD_TIMEOUT = 900  # seconds
+CHECK_INTERVAL = 5      # seconds
+QUIET_PERIOD = 15       # seconds with no new images before stopping the CLI
+
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg")
+
+
+def _list_image_files(dest_path: Path) -> List[Path]:
+    return [
+        file_path
+        for file_path in dest_path.rglob("*")
+        if file_path.is_file() and file_path.suffix.lower() in IMAGE_EXTENSIONS
+    ]
+
+
+def _move_images_to_final_folder(dest_path: Path, folder_name: str = "images") -> Path:
+    images_dir = dest_path / folder_name
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    for image_path in _list_image_files(dest_path):
+        if image_path.parent == images_dir:
+            continue
+
+        target_path = images_dir / image_path.name
+        counter = 1
+        while target_path.exists():
+            target_path = images_dir / f"{image_path.stem}_{counter}{image_path.suffix}"
+            counter += 1
+
+        shutil.move(str(image_path), str(target_path))
+
+    return images_dir
 
 
 def run(dest="output_images", kernel_id=None):
@@ -19,84 +56,108 @@ def run(dest="output_images", kernel_id=None):
     dest_path = Path(dest)
     dest_path.mkdir(parents=True, exist_ok=True)
 
-    # Log files
+    # Log files (opened explicitly so we can stream output without blocking)
     stdout_log = dest_path / "kaggle_cli_stdout.log"
     stderr_log = dest_path / "kaggle_cli_stderr.log"
+    stdout_handle = stdout_log.open("w", encoding="utf-8")
+    stderr_handle = stderr_log.open("w", encoding="utf-8")
 
     # Run Kaggle CLI with hard timeout so it can NEVER hang this process
     logging.info(f"Downloading output artifacts from {kernel_id}...")
-    
-    # Use Popen instead of run to have more control over the process
-    import threading
-    import time
-    
+
     kaggle_cmd = _get_kaggle_command()
-    
+
     process = subprocess.Popen(
         [*kaggle_cmd, "kernels", "output", kernel_id, "-p", str(dest_path).replace("\\", "/")],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout_handle,
+        stderr=stderr_handle,
         text=True,
         encoding="utf-8"
     )
-    
-    # Monitor for image files while download is running
-    download_timeout = 60
-    check_interval = 2
-    elapsed = 0
-    images_found = False
-    
-    while elapsed < download_timeout:
-        # Check if any images have appeared
-        if not images_found:
-            for ext in (".png", ".jpg", ".jpeg"):
-                if list(dest_path.rglob(f"**/*{ext}")):
-                    images_found = True
-                    logging.info("Image files detected, continuing download...")
-                    break
-        
-        # Check if process has finished
-        retcode = process.poll()
-        if retcode is not None:
-            logging.info(f"Kaggle CLI finished with return code {retcode}")
-            break
-        
-        time.sleep(check_interval)
-        elapsed += check_interval
-    
-    # If still running after timeout, kill it
-    if process.poll() is None:
-        logging.warning(f"Kaggle CLI still running after {download_timeout}s, terminating process")
+
+    start_time = time.time()
+    last_image_activity = None
+    images_detected = False
+
+    def _terminate_process():
+        if process.poll() is not None:
+            return
+        logging.info("Stopping Kaggle CLI download process...")
         process.terminate()
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
+            logging.warning("Kaggle CLI did not exit gracefully, killing process")
             process.kill()
-            process.wait()
-    
-    # Collect output
-    try:
-        stdout, stderr = process.communicate(timeout=1)
-        stdout_log.write_text(stdout or "", encoding="utf-8")
-        stderr_log.write_text(stderr or "", encoding="utf-8")
-    except:
-        stdout_log.write_text("Download process was terminated\n", encoding="utf-8")
-        stderr_log.write_text("Process terminated after timeout\n", encoding="utf-8")
 
-    logging.info("Download completed. All artifacts preserved.")
+    try:
+        while True:
+            current_images = _list_image_files(dest_path)
+            if current_images:
+                latest_mtime = max(image.stat().st_mtime for image in current_images)
+                if not images_detected:
+                    logging.info(
+                        "Image files detected locally. Waiting up to %s seconds for additional prompts to finish...",
+                        QUIET_PERIOD,
+                    )
+                images_detected = True
+                last_image_activity = latest_mtime
+
+            now = time.time()
+
+            if images_detected and last_image_activity and (now - last_image_activity) >= QUIET_PERIOD:
+                logging.info(
+                    "No new image files detected in the last %s seconds. Assuming download complete.",
+                    QUIET_PERIOD,
+                )
+                _terminate_process()
+                break
+
+            retcode = process.poll()
+            if retcode is not None:
+                logging.info(f"Kaggle CLI finished with return code {retcode}")
+                break
+
+            if now - start_time >= DOWNLOAD_TIMEOUT:
+                logging.warning(
+                    "Kaggle CLI still running after %s seconds, terminating process",
+                    DOWNLOAD_TIMEOUT,
+                )
+                _terminate_process()
+                break
+
+            time.sleep(CHECK_INTERVAL)
+    finally:
+        # Make sure the process has fully exited and file handles are flushed
+        if process.poll() is None:
+            _terminate_process()
+        process.wait()
+        stdout_handle.flush()
+        stderr_handle.flush()
+        stdout_handle.close()
+        stderr_handle.close()
+
+    images_dir = _move_images_to_final_folder(dest_path)
+    image_count = len(list(images_dir.glob("*")))
+
+    if image_count > 0:
+        logging.info(f"Download completed. {image_count} image(s) available at {images_dir}")
+    else:
+        logging.warning("Download completed but no images found.")
+
+def _find_pyproject_toml() -> bool:
+    current = Path.cwd()
+    while current != current.parent:
+        if (current / "pyproject.toml").exists():
+            return True
+        current = current.parent
+    return False
 
 
 def _get_kaggle_command():
-    """
-    Get the appropriate command to run Kaggle CLI.
-    
-    Returns:
-        list: Command parts to execute kaggle CLI
-    """
-    # Check if poetry is available and we're in a poetry project
-    if shutil.which("poetry") and Path("pyproject.toml").exists():
+    """Return the command used to invoke the Kaggle CLI."""
+    if shutil.which("poetry") and _find_pyproject_toml():
         try:
-            # Test if poetry can run the kaggle command
             result = subprocess.run(
                 ["poetry", "run", "python", "-c", "import kaggle"],
                 capture_output=True,
@@ -107,6 +168,6 @@ def _get_kaggle_command():
                 return ["poetry", "run", "python", "-m", "kaggle.cli"]
         except Exception:
             pass
-    
-    # Fallback to direct python call
-    return ["python", "-m", "kaggle.cli"]
+
+    # Fallback to the current Python interpreter to guarantee module availability
+    return [sys.executable, "-m", "kaggle.cli"]
