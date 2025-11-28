@@ -1,5 +1,6 @@
 from unittest.mock import patch, MagicMock, call
 from imggenhub.kaggle.utils import poll_status
+import sys
 
 @patch('imggenhub.kaggle.utils.poll_status._get_kaggle_command', return_value=['kaggle'])
 @patch('imggenhub.kaggle.utils.poll_status.subprocess.run')
@@ -55,16 +56,16 @@ def test_run_status_complete(mock_subproc, mock_kaggle_cmd):
     @patch('pathlib.Path.exists', return_value=False)
     def test_get_kaggle_command_fallback_no_pyproject(self, mock_exists, mock_which):
         cmd = poll_status._get_kaggle_command()
-        assert cmd == ["python", "-m", "kaggle.cli"]
+        assert cmd == [sys.executable, "-m", "kaggle.cli"]
 
     @patch('shutil.which', return_value=True)
     @patch('pathlib.Path.exists', return_value=True)
     @patch('subprocess.run', side_effect=[MagicMock(returncode=1), MagicMock(returncode=0)])  # First fails, second succeeds
     def test_get_kaggle_command_poetry_fallback_on_error(self, mock_subproc, mock_exists, mock_which):
         cmd = poll_status._get_kaggle_command()
-        assert cmd == ["python", "-m", "kaggle.cli"]
+        assert cmd == [sys.executable, "-m", "kaggle.cli"]
 
     @patch('shutil.which', return_value=False)
     def test_get_kaggle_command_no_poetry(self, mock_which):
         cmd = poll_status._get_kaggle_command()
-        assert cmd == ["python", "-m", "kaggle.cli"]
+        assert cmd == [sys.executable, "-m", "kaggle.cli"]

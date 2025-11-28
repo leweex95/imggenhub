@@ -3,6 +3,7 @@ import time
 import re
 import logging
 import shutil
+import sys
 from pathlib import Path
 
 KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
@@ -70,5 +71,5 @@ def _get_kaggle_command():
         except Exception:
             pass
     
-    # Fallback to direct python call
-    return ["python", "-m", "kaggle.cli"]
+    # Fallback to the current Python interpreter (e.g., Poetry virtualenv)
+    return [sys.executable, "-m", "kaggle.cli"]

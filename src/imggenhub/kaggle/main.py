@@ -13,7 +13,7 @@ from imggenhub.kaggle.utils.precision_validator import PrecisionValidator
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_name=None, refiner_model_name=None, prompt=None, prompts=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None, img_size=None):
+def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_name=None, refiner_model_name=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None, img_size=None):
     """Run Kaggle image generation pipeline: deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
     cwd = Path(__file__).parent
@@ -83,17 +83,25 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
 
 def main():
     """Main entry point - focused on argument parsing and orchestration"""
+    parser = argparse.ArgumentParser(description="Kaggle image generation pipeline")
+    parser.add_argument("--dest", type=str, default=None, help="Optional prefix for output folder (default: timestamp only)")
+    parser.add_argument("--output_base_dir", type=str, default=None, help="Base directory for output runs (default: current working directory)")
+    
+    # Parse only known args to get output_base_dir and dest early
+    early_args, remaining = parser.parse_known_args()
+    
     # Set up output directory and log CLI command early
-    dest_path = setup_output_directory()
+    dest_path = setup_output_directory(base_name=early_args.dest, base_dir=early_args.output_base_dir)
     log_cli_command(dest_path)
 
-    # Parse command line arguments
+    # Parse full command line arguments
     parser = argparse.ArgumentParser(description="Kaggle image generation pipeline")
     parser.add_argument("--prompts_file", type=str, default="./config/prompts.json")
     parser.add_argument("--notebook", type=str, default=None, help="Notebook to use (auto-detects based on model if not specified)")
     parser.add_argument("--kernel_path", type=str, default="./config")
     parser.add_argument("--gpu", action="store_true", help="Enable GPU for the kernel")
-    parser.add_argument("--dest", type=str, default="output_images")
+    parser.add_argument("--dest", type=str, default=None, help="Optional prefix for output folder (default: timestamp only)")
+    parser.add_argument("--output_base_dir", type=str, default=None, help="Base directory for output runs (default: current working directory)")
     parser.add_argument("--model_name", type=str, default=None, help="Image generation model to use")
     parser.add_argument("--refiner_model_name", type=str, default=None, help="Refiner model to use")
     parser.add_argument("--prompt", type=str, default=None, help="Single prompt string")
@@ -101,15 +109,15 @@ def main():
     parser.add_argument("--guidance", type=float, required=True, help="Guidance scale (7-12 recommended for photorealism)")
     parser.add_argument("--steps", type=int, required=True, help="Number of inference steps (50-100 for better quality)")
     parser.add_argument("--precision", type=str, required=True, choices=["fp32", "fp16", "bf16", "int8", "int4", "q4"],
-                        help="Precision level: fp32 (highest quality), fp16 (balanced), bf16 (recommended for Flux), q4 (GGUF quantized), int8 (faster), int4 (fastest)")
+                        help="Precision level (REQUIRED): fp32 (highest quality), fp16 (balanced), bf16 (recommended for Flux), q4 (GGUF quantized), int8 (faster), int4 (fastest)")
     parser.add_argument("--negative_prompt", type=str, default=None, help="Custom negative prompt for better quality control")
     parser.add_argument("--two_stage_refiner", action="store_true", help="Use two-stage approach: base model → unload VRAM → refiner model (saves VRAM)")
     parser.add_argument("--refiner_guidance", type=float, default=None, help="Guidance scale for refiner (REQUIRED when using --refiner_model_name)")
     parser.add_argument("--refiner_steps", type=int, default=None, help="Number of inference steps for refiner (REQUIRED when using --refiner_model_name)")
     parser.add_argument("--refiner_precision", type=str, default=None, choices=["fp32", "fp16", "bf16", "int8", "int4"],
-                        help="Precision level for refiner (defaults to same as --precision)")
+                        help="Precision level for refiner (REQUIRED when using --refiner_model_name, or inherits from --precision)")
     parser.add_argument("--refiner_negative_prompt", type=str, default=None, help="Custom negative prompt for refiner (defaults to same as --negative_prompt)")
-    parser.add_argument("--hf-token", type=str, default=None, dest="hf_token", help="HuggingFace API token for accessing gated models (e.g., FLUX.1-schnell)")
+    parser.add_argument("--hf_token", type=str, default=None, help="HuggingFace API token for accessing gated models (e.g., FLUX.1-schnell)")
     parser.add_argument("--img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
 
@@ -196,6 +204,9 @@ def main():
     
     img_size = (args.img_height, args.img_width)
 
+    # Precision is now required; no auto-detection
+    logging.info(f"Using explicit precision: {args.precision}")
+
     # Validate arguments including precision availability
     try:
         _validate_args(args)
@@ -275,23 +286,24 @@ def _validate_args(args):
     use_refiner = (args.refiner_model_name is not None)
 
     # Validate precision availability for base model
-    # Skip validation for Kaggle models (not on HuggingFace)
-    if _is_kaggle_model(args.model_name):
-        print(f"Skipping precision validation for Kaggle model: {args.model_name}")
-    # Skip validation for FLUX models - they support all precisions via torch_dtype
-    elif "flux" in args.model_name.lower():
-        print(f"Skipping precision validation for FLUX model (supports all precisions): {args.model_name}")
-    else:
-        print(f"Validating precision '{args.precision}' availability for {args.model_name}...")
-        validator = PrecisionValidator(args.hf_token)
-        try:
-            available_variants = validator.detect_available_variants(args.model_name)
-            if args.precision not in available_variants:
-                available_str = ", ".join(available_variants) if available_variants else "none"
-                raise ValueError(f"Precision '{args.precision}' not available for model '{args.model_name}'. Available: {available_str}")
-            print(f"[OK] Precision '{args.precision}' is available")
-        except Exception as e:
-            raise ValueError(f"Failed to validate precision for model '{args.model_name}': {e}")
+    if args.precision != "auto":  # Skip if auto-detected (already validated)
+        # Skip validation for Kaggle models (not on HuggingFace)
+        if _is_kaggle_model(args.model_name):
+            print(f"Skipping precision validation for Kaggle model: {args.model_name}")
+        # Skip validation for FLUX models - they support all precisions via torch_dtype
+        elif "flux" in args.model_name.lower():
+            print(f"Skipping precision validation for FLUX model (supports all precisions): {args.model_name}")
+        else:
+            print(f"Validating precision '{args.precision}' availability for {args.model_name}...")
+            detector = PrecisionValidator(args.hf_token)
+            try:
+                available_variants = detector.detect_available_variants(args.model_name)
+                if args.precision not in available_variants:
+                    available_str = ", ".join(available_variants) if available_variants else "none"
+                    raise ValueError(f"Precision '{args.precision}' not available for model '{args.model_name}'. Available: {available_str}")
+                print(f"[OK] Precision '{args.precision}' is available")
+            except Exception as e:
+                raise ValueError(f"Failed to validate precision for model '{args.model_name}': {e}")
 
     # Validate refiner precision if using refiner
     if use_refiner and args.refiner_precision:
@@ -303,9 +315,9 @@ def _validate_args(args):
             print(f"Skipping refiner precision validation for Kaggle model: {refiner_model}")
         else:
             print(f"Validating refiner precision '{args.refiner_precision}' availability for {refiner_model}...")
-            validator = PrecisionValidator(args.hf_token)
+            detector = PrecisionValidator(args.hf_token)
             try:
-                available_variants = validator.detect_available_variants(refiner_model)
+                available_variants = detector.detect_available_variants(refiner_model)
                 if args.refiner_precision not in available_variants:
                     available_str = ", ".join(available_variants) if available_variants else "none"
                     raise ValueError(f"Refiner precision '{args.refiner_precision}' not available for model '{refiner_model}'. Available: {available_str}")

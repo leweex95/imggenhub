@@ -38,6 +38,10 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     """
     Deploy Kaggle notebook kernel, optionally overriding prompts and model.
     Uses the specified notebook; user is responsible for matching notebook to model.
+    
+    NOTE: If hf_token is provided locally, you must also add it as a Kaggle Secret
+    named 'HF_TOKEN' via https://www.kaggle.com/settings so the kernel can access it.
+    The notebook reads from os.getenv("HF_TOKEN"), NOT from hardcoded values.
     """
     
     # Resolve notebook path relative to kernel_path
@@ -118,10 +122,6 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
                     'print("Text encoder loaded from local files")'
                 ) for line in source]
 
-            # Pass HF_TOKEN to all notebooks that need it (FLUX GGUF and standard models)
-            if hf_token:
-                source = _update_param(source, "HF_TOKEN", hf_token)
-            
             # Non-Flux specific parameters (refiner, negative prompts, etc.)
             if not is_flux_notebook and not is_flux_gguf_notebook:
                 if refiner_model_id:
@@ -144,6 +144,16 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     # Save updated notebook
     with open(nb_path, "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=2)
+
+    # Warn if HF_TOKEN is required but user hasn't set it as Kaggle Secret
+    model_source = os.environ.get("MODEL_SOURCE", "dataset").lower()
+    if hf_token and model_source != "dataset":
+        logging.warning("="*80)
+        logging.warning("HF_TOKEN provided locally but notebook uses os.getenv('HF_TOKEN')")
+        logging.warning("Ensure you've added 'HF_TOKEN' as a Kaggle Secret at:")
+        logging.warning("https://www.kaggle.com/settings")
+        logging.warning("Otherwise the kernel will fail to download models from HuggingFace")
+        logging.warning("="*80)
 
     # Update kernel metadata
     metadata_path = Path(kernel_path) / "kernel-metadata.json"
@@ -180,7 +190,8 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
         kernel_meta["enable_gpu"] = str(gpu).lower()
     
     # Update code_file to point to the correct notebook
-    kernel_meta["code_file"] = notebook.name
+    notebook_path = Path(notebook) if not isinstance(notebook, Path) else notebook
+    kernel_meta["code_file"] = notebook_path.name
     
     # Dynamic dataset_sources: only attach datasets if MODEL_SOURCE is "dataset"
     # This saves GPU startup time when using HuggingFace downloads
@@ -213,15 +224,15 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     with open(metadata_path, "r", encoding="utf-8") as f:
         verify_meta = json.load(f)
     
-    if verify_meta.get("code_file") != notebook.name:
+    if verify_meta.get("code_file") != notebook_path.name:
         raise RuntimeError(
             f"ERROR: Metadata update verification failed!\n"
-            f"  Expected code_file: {notebook.name}\n"
+            f"  Expected code_file: {notebook_path.name}\n"
             f"  Got code_file: {verify_meta.get('code_file')}\n"
             f"  Metadata file: {metadata_path}"
         )
     
-    logging.info(f" VERIFIED: Metadata correctly updated from '{original_code_file}' to '{notebook.name}'")
+    logging.info(f" VERIFIED: Metadata correctly updated from '{original_code_file}' to '{notebook_path.name}'")
     
     # Push via Kaggle CLI - try Poetry first, fallback to direct python
     kaggle_cmd = _get_kaggle_command()
