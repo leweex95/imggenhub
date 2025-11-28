@@ -8,7 +8,7 @@ from imggenhub.kaggle.utils import poll_status
 from imggenhub.kaggle.utils.prompts import resolve_prompts
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
-from imggenhub.kaggle.utils.auto_precision import AutoPrecisionDetector
+from imggenhub.kaggle.utils.precision_validator import PrecisionValidator
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -100,8 +100,8 @@ def main():
     parser.add_argument("--prompts", type=str, nargs="+", default=None, help="Multiple prompts")
     parser.add_argument("--guidance", type=float, required=True, help="Guidance scale (7-12 recommended for photorealism)")
     parser.add_argument("--steps", type=int, required=True, help="Number of inference steps (50-100 for better quality)")
-    parser.add_argument("--precision", type=str, choices=["fp32", "fp16", "bf16", "int8", "int4", "q4", "auto"],
-                        default="auto", help="Precision level: fp32 (highest quality), fp16 (balanced), bf16 (recommended for Flux), q4 (GGUF quantized), int8 (faster), int4 (fastest), auto (detect optimal)")
+    parser.add_argument("--precision", type=str, required=True, choices=["fp32", "fp16", "bf16", "int8", "int4", "q4"],
+                        help="Precision level: fp32 (highest quality), fp16 (balanced), bf16 (recommended for Flux), q4 (GGUF quantized), int8 (faster), int4 (fastest)")
     parser.add_argument("--negative_prompt", type=str, default=None, help="Custom negative prompt for better quality control")
     parser.add_argument("--two_stage_refiner", action="store_true", help="Use two-stage approach: base model → unload VRAM → refiner model (saves VRAM)")
     parser.add_argument("--refiner_guidance", type=float, default=None, help="Guidance scale for refiner (REQUIRED when using --refiner_model_name)")
@@ -109,7 +109,7 @@ def main():
     parser.add_argument("--refiner_precision", type=str, default=None, choices=["fp32", "fp16", "bf16", "int8", "int4"],
                         help="Precision level for refiner (defaults to same as --precision)")
     parser.add_argument("--refiner_negative_prompt", type=str, default=None, help="Custom negative prompt for refiner (defaults to same as --negative_prompt)")
-    parser.add_argument("--hf_token", type=str, default=None, help="HuggingFace API token for accessing gated models (e.g., FLUX.1-schnell)")
+    parser.add_argument("--hf-token", type=str, default=None, dest="hf_token", help="HuggingFace API token for accessing gated models (e.g., FLUX.1-schnell)")
     parser.add_argument("--img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
 
@@ -196,28 +196,6 @@ def main():
     
     img_size = (args.img_height, args.img_width)
 
-    # Auto-detect precision if requested
-    if args.precision == "auto":
-        if not args.model_name:
-            print("Error: --model_name is required when using --precision auto")
-            return
-        if _is_flux_gguf_model(args.model_name):
-            args.precision = "q4"
-            print(f"Using default precision 'q4' for FLUX GGUF model: {args.model_name}")
-        elif _is_kaggle_model(args.model_name):
-            # For Kaggle models, use fp16 as default (most common for FLUX)
-            args.precision = "fp16"
-            print(f"Using default precision 'fp16' for Kaggle model: {args.model_name}")
-        elif "flux" in args.model_name.lower():
-            # FLUX models work best with bfloat16
-            args.precision = "bf16"
-            print(f"Using default precision 'bf16' for FLUX model: {args.model_name}")
-        else:
-            print(f"Auto-detecting optimal precision for {args.model_name}...")
-            detected_precision, _ = auto_detect_precision(args.model_name, args.hf_token)
-            args.precision = detected_precision
-            print(f"Detected optimal precision: {args.precision}")
-
     # Validate arguments including precision availability
     try:
         _validate_args(args)
@@ -297,24 +275,23 @@ def _validate_args(args):
     use_refiner = (args.refiner_model_name is not None)
 
     # Validate precision availability for base model
-    if args.precision != "auto":  # Skip if auto-detected (already validated)
-        # Skip validation for Kaggle models (not on HuggingFace)
-        if _is_kaggle_model(args.model_name):
-            print(f"Skipping precision validation for Kaggle model: {args.model_name}")
-        # Skip validation for FLUX models - they support all precisions via torch_dtype
-        elif "flux" in args.model_name.lower():
-            print(f"Skipping precision validation for FLUX model (supports all precisions): {args.model_name}")
-        else:
-            print(f"Validating precision '{args.precision}' availability for {args.model_name}...")
-            detector = AutoPrecisionDetector(args.hf_token)
-            try:
-                available_variants = detector.detect_available_variants(args.model_name)
-                if args.precision not in available_variants:
-                    available_str = ", ".join(available_variants) if available_variants else "none"
-                    raise ValueError(f"Precision '{args.precision}' not available for model '{args.model_name}'. Available: {available_str}")
-                print(f"[OK] Precision '{args.precision}' is available")
-            except Exception as e:
-                raise ValueError(f"Failed to validate precision for model '{args.model_name}': {e}")
+    # Skip validation for Kaggle models (not on HuggingFace)
+    if _is_kaggle_model(args.model_name):
+        print(f"Skipping precision validation for Kaggle model: {args.model_name}")
+    # Skip validation for FLUX models - they support all precisions via torch_dtype
+    elif "flux" in args.model_name.lower():
+        print(f"Skipping precision validation for FLUX model (supports all precisions): {args.model_name}")
+    else:
+        print(f"Validating precision '{args.precision}' availability for {args.model_name}...")
+        validator = PrecisionValidator(args.hf_token)
+        try:
+            available_variants = validator.detect_available_variants(args.model_name)
+            if args.precision not in available_variants:
+                available_str = ", ".join(available_variants) if available_variants else "none"
+                raise ValueError(f"Precision '{args.precision}' not available for model '{args.model_name}'. Available: {available_str}")
+            print(f"[OK] Precision '{args.precision}' is available")
+        except Exception as e:
+            raise ValueError(f"Failed to validate precision for model '{args.model_name}': {e}")
 
     # Validate refiner precision if using refiner
     if use_refiner and args.refiner_precision:
@@ -326,9 +303,9 @@ def _validate_args(args):
             print(f"Skipping refiner precision validation for Kaggle model: {refiner_model}")
         else:
             print(f"Validating refiner precision '{args.refiner_precision}' availability for {refiner_model}...")
-            detector = AutoPrecisionDetector(args.hf_token)
+            validator = PrecisionValidator(args.hf_token)
             try:
-                available_variants = detector.detect_available_variants(refiner_model)
+                available_variants = validator.detect_available_variants(refiner_model)
                 if args.refiner_precision not in available_variants:
                     available_str = ", ".join(available_variants) if available_variants else "none"
                     raise ValueError(f"Refiner precision '{args.refiner_precision}' not available for model '{refiner_model}'. Available: {available_str}")

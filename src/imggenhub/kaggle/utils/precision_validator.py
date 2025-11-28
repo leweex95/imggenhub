@@ -1,54 +1,28 @@
 #!/usr/bin/env python
 """
-Auto-precision detection for HuggingFace models.
-Integrates with the existing pipeline to automatically detect optimal precision.
+Precision validation for HuggingFace models.
+Validates that requested precision variants are available for models.
 """
 
 import requests
-from typing import Optional, Tuple
-import torch
+from typing import Optional, List
 
-class AutoPrecisionDetector:
-    """Automatically detects the best available precision for a model."""
+
+class PrecisionValidator:
+    """Validates precision availability for HuggingFace models."""
 
     def __init__(self, hf_token: Optional[str] = None):
         self.hf_token = hf_token
         self.headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
 
-    def detect_available_variants(self, model_id: str) -> dict:
-        """Get all available variants for a model."""
+    def detect_available_variants(self, model_id: str) -> List[str]:
+        """Get all available precision variants for a model."""
         try:
             files = self._get_model_files(model_id)
         except Exception:
-            return {}
+            return []
 
         return self._extract_variants_from_files(files, 'safetensors')
-
-    def detect_best_precision(self, model_id: str, preferred_format: str = 'safetensors') -> Tuple[str, Optional[str]]:
-        try:
-            files = self._get_model_files(model_id)
-        except Exception as e:
-            print(f"Warning: Could not detect variants for {model_id}: {e}")
-            return 'fp32', None  # Safe fallback
-
-        available_variants = self._extract_variants_from_files(files, preferred_format)
-
-        if not available_variants:
-            print(f"Warning: No {preferred_format} variants found for {model_id}, using fp32")
-            return 'fp32', None
-
-        # Preference order: fp16 > bf16 > fp32 > int8 > int4
-        preference_order = ['fp16', 'bf16', 'fp32', 'int8', 'int4']
-
-        for preferred in preference_order:
-            if preferred in available_variants:
-                variant = preferred if preferred != 'fp32' else None
-                return preferred, variant
-
-        # Fallback to first available
-        first_variant = available_variants[0]
-        variant = first_variant if first_variant != 'fp32' else None
-        return first_variant, variant
 
     def _get_model_files(self, model_id: str) -> list:
         """Get model files from HuggingFace API."""
@@ -63,7 +37,7 @@ class AutoPrecisionDetector:
 
         return response.json()
 
-    def _extract_variants_from_files(self, files: list, format_type: str) -> list:
+    def _extract_variants_from_files(self, files: list, format_type: str) -> List[str]:
         """Extract precision variants from file list."""
         extension = f".{format_type}"
         variants = []
@@ -109,15 +83,3 @@ class AutoPrecisionDetector:
                 return precision
 
         return 'fp32'  # Default if no indicator found
-
-
-def auto_detect_precision(model_id: str, hf_token: Optional[str] = None) -> Tuple[str, Optional[str]]:
-    """
-    Convenience function to auto-detect precision for a model.
-
-    Usage:
-        precision, variant = auto_detect_precision("black-forest-labs/FLUX.1-schnell", hf_token)
-        # Use in your pipeline
-    """
-    detector = AutoPrecisionDetector(hf_token)
-    return detector.detect_best_precision(model_id)
