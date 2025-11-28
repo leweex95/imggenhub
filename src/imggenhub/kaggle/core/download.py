@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(m
 KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
 
 # Monitoring configuration (tunable for tests)
-DOWNLOAD_TIMEOUT = 900  # seconds
+DOWNLOAD_TIMEOUT = 60   # seconds
 CHECK_INTERVAL = 5      # seconds
 QUIET_PERIOD = 15       # seconds with no new images before stopping the CLI
 
@@ -29,6 +29,11 @@ def _list_image_files(dest_path: Path) -> List[Path]:
 
 
 def _move_images_to_final_folder(dest_path: Path, folder_name: str = "images") -> Path:
+    # If dest_path already ends with the target folder name, use it directly (no subfolder)
+    # This prevents double nesting when caller already provides a properly named directory
+    if dest_path.name == folder_name:
+        return dest_path
+    
     images_dir = dest_path / folder_name
     images_dir.mkdir(parents=True, exist_ok=True)
 
