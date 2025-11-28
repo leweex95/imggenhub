@@ -18,21 +18,30 @@ def reconstruct_command() -> str:
     return f"poetry run python -m imggenhub.kaggle.main {args_part}"
 
 
-def setup_output_directory(base_name: str = "output_images") -> Path:
+def setup_output_directory(base_name: str = None, base_dir: str = None) -> Path:
     """
     Create a timestamp-based output directory for the current run.
 
+    Output structure: outputs/TIMESTAMP/ (or outputs/base_name_TIMESTAMP/ if base_name provided)
+
     Args:
-        base_name: Base name for the output directory (default: "output_images")
+        base_name: Optional prefix for the timestamp folder (default: None, uses timestamp only)
+        base_dir: Optional base directory path (default: current working directory)
 
     Returns:
         Path: Path to the created output directory
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_base = Path("output")
-    output_base.mkdir(exist_ok=True)
+    if base_dir:
+        output_base = Path(base_dir) / "outputs"
+    else:
+        output_base = Path.cwd() / "outputs"
+    output_base.mkdir(parents=True, exist_ok=True)
 
-    run_name = f"{base_name}_{timestamp}"
+    if base_name:
+        run_name = f"{base_name}_{timestamp}"
+    else:
+        run_name = timestamp
     dest_path = output_base / run_name
     dest_path.mkdir(parents=True, exist_ok=True)
 
