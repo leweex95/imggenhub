@@ -104,12 +104,11 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
                 source = _update_param(source, "STEPS", steps)
             if precision:
                 source = _update_param(source, "PRECISION", precision)
-            # Don't override OUTPUT_DIR - use notebook's default "output_images" to avoid folder duplication
-            # The timestamp folder is created on the local machine, not in the notebook
+            # Override OUTPUT_DIR to "." so notebook writes to download root, not nested "images/" folder
+            # This prevents images/images/ nesting when download path already ends in "images"
+            source = _update_param(source, "OUTPUT_DIR", ".")
             if img_size:
-                source = _update_param(source, "IMG_SIZE", img_size)
-
-            # For FLUX notebooks, modify model loading to use local text encoder
+                source = _update_param(source, "IMG_SIZE", img_size)            # For FLUX notebooks, modify model loading to use local text encoder
             if is_flux_notebook and not is_flux_gguf_notebook and "FluxPipeline.from_pretrained" in "".join(source):
                 # Replace the model loading with custom loading using local text encoder
                 source = [line.replace(

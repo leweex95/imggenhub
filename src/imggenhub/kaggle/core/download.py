@@ -143,7 +143,7 @@ def run(dest="output_images", kernel_id=None):
         stderr_handle.close()
 
     images_dir = _move_images_to_final_folder(dest_path)
-    image_count = len(list(images_dir.glob("*")))
+    image_count = len(_list_image_files(images_dir))
 
     if image_count > 0:
         logging.info(f"Download completed. {image_count} image(s) available at {images_dir}")
