@@ -23,19 +23,25 @@ def setup_output_directory(base_name: str = None, base_dir: str = None) -> Path:
     Create a timestamp-based output directory for the current run.
 
     Output structure: outputs/TIMESTAMP/ (or outputs/base_name_TIMESTAMP/ if base_name provided)
+                      OR base_dir directly when base_dir is provided (no timestamp subfolder)
 
     Args:
         base_name: Optional prefix for the timestamp folder (default: None, uses timestamp only)
-        base_dir: Optional base directory path (default: current working directory)
+        base_dir: Optional base directory path - when provided, used directly without creating timestamp subfolder
 
     Returns:
         Path: Path to the created output directory
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if base_dir:
-        output_base = Path(base_dir) / "outputs"
-    else:
-        output_base = Path.cwd() / "outputs"
+        # When base_dir is explicitly provided, use it DIRECTLY without creating timestamp subfolder
+        # This is the caller's responsibility to provide a unique directory
+        dest_path = Path(base_dir)
+        dest_path.mkdir(parents=True, exist_ok=True)
+        return dest_path
+    
+    # Default behavior: create timestamp-based directory
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_base = Path.cwd() / "outputs"
     output_base.mkdir(parents=True, exist_ok=True)
 
     if base_name:
