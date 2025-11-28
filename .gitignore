@@ -207,6 +207,7 @@ __marimo__/
 
 # Output files
 output/
+outputs/
 
 # Coding guidelines
 .github/copilot-instructions.md
