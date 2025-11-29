@@ -30,10 +30,14 @@ def validate_args(args: Any):
         raise ValueError("Both --img_width and --img_height are required.")
     if is_flux_gguf_model(args.model_name):
         if args.img_width % 16 != 0 or args.img_height % 16 != 0:
-            raise ValueError(f"FLUX models require image dimensions divisible by 16. Got: {args.img_width}x{args.img_height}")
+            next_width = ((args.img_width // 16) + 1) * 16 if args.img_width % 16 != 0 else args.img_width
+            next_height = ((args.img_height // 16) + 1) * 16 if args.img_height % 16 != 0 else args.img_height
+            raise ValueError(f"FLUX models require image dimensions divisible by 16. Got: {args.img_width}x{args.img_height}. Recommendation: {next_width}x{next_height}")
     else:
         if args.img_width % 8 != 0 or args.img_height % 8 != 0:
-            raise ValueError(f"Stable Diffusion models require image dimensions divisible by 8. Got: {args.img_width}x{args.img_height}")
+            next_width = ((args.img_width // 8) + 1) * 8 if args.img_width % 8 != 0 else args.img_width
+            next_height = ((args.img_height // 8) + 1) * 8 if args.img_height % 8 != 0 else args.img_height
+            raise ValueError(f"Stable Diffusion models require image dimensions divisible by 8. Got: {args.img_width}x{args.img_height}. Recommendation: {next_width}x{next_height}")
     if args.steps is None:
         raise ValueError("--steps is required")
     if args.guidance is None:
