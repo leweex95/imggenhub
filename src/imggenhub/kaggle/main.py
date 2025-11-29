@@ -8,7 +8,7 @@ from imggenhub.kaggle.utils import poll_status
 from imggenhub.kaggle.utils.prompts import resolve_prompts
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
-from imggenhub.kaggle.utils.precision_validator import PrecisionValidator
+from imggenhub.kaggle.utils.arg_validator import validate_args
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -209,57 +209,11 @@ def main():
 
     # Validate arguments including precision availability
     try:
-        _validate_args(args)
+        validate_args(args)
     except ValueError as e:
         print(f"Error: {e}")
         return
     run_pipeline(
-        dest_path=dest_path,
-        prompts_file=args.prompts_file,
-        notebook=args.notebook,
-        kernel_path=args.kernel_path,
-        gpu=args.gpu,
-        model_name=args.model_name,
-        refiner_model_name=args.refiner_model_name,
-        prompt=args.prompt,
-        prompts=args.prompts,
-        guidance=args.guidance,
-        steps=args.steps,
-        precision=args.precision,
-        negative_prompt=args.negative_prompt,
-        two_stage_refiner=args.two_stage_refiner,
-        refiner_guidance=args.refiner_guidance,
-        refiner_steps=args.refiner_steps,
-        refiner_precision=args.refiner_precision,
-        refiner_negative_prompt=args.refiner_negative_prompt,
-        hf_token=args.hf_token,
-        img_size=img_size
-    )
-
-
-def _validate_args(args):
-    """Validate command line arguments with loud warnings for any fallbacks"""
-    
-    # Validate model name is provided
-    if not args.model_name:
-        print("="*80)
-        print("[ERROR] --model_name is required")
-        print("[ERROR] Example: --model_name flux-gguf-q4")
-        print("="*80)
-        raise ValueError("--model_name is required")
-    
-    # Validate prompts are provided
-    if not args.prompt and not args.prompts and not args.prompts_file:
-        print("="*80)
-        print("[ERROR] No prompts provided")
-        print("[ERROR] Specify at least one of:")
-        print("[ERROR]   --prompt \"your prompt\"")
-        print("[ERROR]   --prompts \"prompt1\" \"prompt2\"")
-        print("[ERROR]   --prompts_file path/to/prompts.txt")
-        print("="*80)
-        raise ValueError("No prompts provided")
-    
-    # Validate compulsory parameters before any deployment
     if args.steps is None:
         print("="*80)
         print("[ERROR] --steps is required")
