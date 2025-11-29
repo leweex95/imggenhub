@@ -8,7 +8,7 @@ from imggenhub.kaggle.utils import poll_status
 from imggenhub.kaggle.utils.prompts import resolve_prompts
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
-from imggenhub.kaggle.utils.precision_validator import PrecisionValidator
+from imggenhub.kaggle.utils.arg_validator import validate_args
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -209,7 +209,7 @@ def main():
 
     # Validate arguments including precision availability
     try:
-        _validate_args(args)
+        validate_args(args)
     except ValueError as e:
         print(f"Error: {e}")
         return
@@ -236,105 +236,7 @@ def main():
         img_size=img_size
     )
 
-
-def _validate_args(args):
-    """Validate command line arguments with loud warnings for any fallbacks"""
-    
-    # Validate model name is provided
-    if not args.model_name:
-        print("="*80)
-        print("[ERROR] --model_name is required")
-        print("[ERROR] Example: --model_name flux-gguf-q4")
-        print("="*80)
-        raise ValueError("--model_name is required")
-    
-    # Validate prompts are provided
-    if not args.prompt and not args.prompts and not args.prompts_file:
-        print("="*80)
-        print("[ERROR] No prompts provided")
-        print("[ERROR] Specify at least one of:")
-        print("[ERROR]   --prompt \"your prompt\"")
-        print("[ERROR]   --prompts \"prompt1\" \"prompt2\"")
-        print("[ERROR]   --prompts_file path/to/prompts.txt")
-        print("="*80)
-        raise ValueError("No prompts provided")
-    
-    # Validate compulsory parameters before any deployment
-    if args.steps is None:
-        print("="*80)
-        print("[ERROR] --steps is required")
-        print("[ERROR] Example: --steps 4")
-        print("="*80)
-        raise ValueError("--steps is required")
-    
-    if args.guidance is None:
-        print("="*80)
-        print("[ERROR] --guidance is required")
-        print("[ERROR] Example: --guidance 1.0")
-        print("="*80)
-        raise ValueError("--guidance is required")
-    
-    if args.precision is None:
-        print("="*80)
-        print("[ERROR] --precision is required")
-        print("[ERROR] Example: --precision q4")
-        print("[ERROR] Available: fp16, fp32, q4, q8")
-        print("="*80)
-        raise ValueError("--precision is required")
-
-    # Automatically enable refiner if refiner_model_name is specified
-    use_refiner = (args.refiner_model_name is not None)
-
-    # Validate precision availability for base model
-    if args.precision != "auto":  # Skip if auto-detected (already validated)
-        # Skip validation for Kaggle models (not on HuggingFace)
-        if _is_kaggle_model(args.model_name):
-            print(f"Skipping precision validation for Kaggle model: {args.model_name}")
-        # Skip validation for FLUX models - they support all precisions via torch_dtype
-        elif "flux" in args.model_name.lower():
-            print(f"Skipping precision validation for FLUX model (supports all precisions): {args.model_name}")
-        else:
-            print(f"Validating precision '{args.precision}' availability for {args.model_name}...")
-            detector = PrecisionValidator(args.hf_token)
-            try:
-                available_variants = detector.detect_available_variants(args.model_name)
-                if args.precision not in available_variants:
-                    available_str = ", ".join(available_variants) if available_variants else "none"
-                    raise ValueError(f"Precision '{args.precision}' not available for model '{args.model_name}'. Available: {available_str}")
-                print(f"[OK] Precision '{args.precision}' is available")
-            except Exception as e:
-                raise ValueError(f"Failed to validate precision for model '{args.model_name}': {e}")
-
-    # Validate refiner precision if using refiner
-    if use_refiner and args.refiner_precision:
-        if not args.refiner_model_name:
-            raise ValueError("--refiner_model_name is required when specifying --refiner_precision")
-        refiner_model = args.refiner_model_name
-        # Skip validation for Kaggle models (not on HuggingFace)
-        if _is_kaggle_model(refiner_model):
-            print(f"Skipping refiner precision validation for Kaggle model: {refiner_model}")
-        else:
-            print(f"Validating refiner precision '{args.refiner_precision}' availability for {refiner_model}...")
-            detector = PrecisionValidator(args.hf_token)
-            try:
-                available_variants = detector.detect_available_variants(refiner_model)
-                if args.refiner_precision not in available_variants:
-                    available_str = ", ".join(available_variants) if available_variants else "none"
-                    raise ValueError(f"Refiner precision '{args.refiner_precision}' not available for model '{refiner_model}'. Available: {available_str}")
-                print(f"[OK] Refiner precision '{args.refiner_precision}' is available")
-            except Exception as e:
-                raise ValueError(f"Failed to validate refiner precision for model '{refiner_model}': {e}")
-
-    # Validate refiner parameters if using refiner
-    if use_refiner:
-        if args.refiner_guidance is None:
-            raise ValueError("--refiner_guidance is required when using a refiner model")
-        if args.refiner_steps is None:
-            raise ValueError("--refiner_steps is required when using a refiner model")
-
-    # Validate prompts
-    if not args.prompt and not args.prompts and not args.prompts_file:
-        raise ValueError("No prompts provided: specify --prompt, --prompts, or --prompts_file")
+    # ...existing code...
 
 
 def _is_kaggle_model(model_id: str) -> bool:

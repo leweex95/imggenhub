@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "imggenhub"
-version = "1.6.3"
+version = "1.6.4"
 description = ""
 authors = ["leweex95 <csibi.levente14@gmail.com>"]
 readme = "README.md"

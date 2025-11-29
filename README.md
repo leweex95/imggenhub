@@ -53,7 +53,7 @@ poetry run imggenhub \
   --prompt "A highly detailed photorealistic portrait of a young woman with long flowing hair, professional studio lighting, sharp focus on eyes, cinematic composition, 8K resolution, masterpiece quality" \
   --guidance 10.0 \
   --steps 75 \
-  --precision int8 \
+  --precision fp16 \
   --negative_prompt "blurry, low quality, distorted, watermark, duplicate, multiple identical people, clones, repetition, cartoon, anime, painting, drawing, sketch, low resolution, pixelated, noisy, grainy, artifacts, overexposed, underexposed, bad anatomy, deformed, ugly, disfigured, poorly lit, bad composition" \
   --dest "photorealistic_portrait"
 ```
