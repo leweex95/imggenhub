@@ -244,14 +244,25 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     # Push via Kaggle CLI - try Poetry first, fallback to direct python
     kaggle_cmd = _get_kaggle_command()
     logging.info(f"Deploying to Kaggle with command: {' '.join(kaggle_cmd)}")
-    result = subprocess.run([*kaggle_cmd, "kernels", "push", "-p", str(kernel_path)], 
-                           check=True, capture_output=True, text=True, encoding='utf-8')
-    
-    # Log output safely
-    if result.stdout:
-        logging.info(f"Kaggle push output: {result.stdout}")
-    if result.stderr:
-        logging.debug(f"Kaggle push stderr: {result.stderr}")
+    try:
+        result = subprocess.run(
+            [*kaggle_cmd, "kernels", "push", "-p", str(kernel_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        if result.stdout:
+            logging.info(f"Kaggle push output: {result.stdout}")
+        if result.stderr:
+            logging.debug(f"Kaggle push stderr: {result.stderr}")
+    except subprocess.CalledProcessError as exc:
+        logging.error(f"Kaggle push FAILED with exit code {exc.returncode}")
+        logging.error(f"Kaggle push stdout: {exc.stdout}")
+        logging.error(f"Kaggle push stderr: {exc.stderr}")
+        logging.error(f"Command was: {exc.cmd}")
+        raise
 
 
 def _get_kaggle_command():

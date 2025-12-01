@@ -24,13 +24,13 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         if not prompts_file.is_absolute():
             prompts_file = cwd / prompts_file
 
-    notebook = Path(notebook)
-    if not notebook.is_absolute():
-        notebook = cwd / "config" / notebook.name  # Always resolve relative to config directory
-
     kernel_path = Path(kernel_path)
     if not kernel_path.is_absolute():
-        kernel_path = cwd / "config"  # Always use config directory
+        kernel_path = cwd / kernel_path  # Respect user-provided kernel path
+
+    notebook = Path(notebook)
+    if not notebook.is_absolute():
+        notebook = kernel_path / notebook.name  # Resolve notebook relative to kernel path
 
     prompts_list = resolve_prompts(prompts_file, prompt, prompts)
 
