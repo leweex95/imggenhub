@@ -33,55 +33,55 @@ ImgGenHub is a personal image generation hub that connects to web-based image ge
 
 ### **Local usage**
 
-#### **Simple single prompt**
+#### Using FLUX.1-schnell
+
+[FLUX.1-schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell) is commercially usable. The full fp32 model doesn't fit into our available VRAM on Kaggle kernels but its lossless bf16 compression does. 
+
+#### FLUX.1-schnell with bf16
+
 ```bash
 poetry run imggenhub \
+  --prompt "A photorealistic restaurant scene: a single customer ordering food, a waiter presenting the menu, natural lighting, sharp focus, realistic textures" \
+  --model_name "black-forest-labs/FLUX.1-schnell" \
+  --steps 4 \
+  --guidance 0.75 \
+  --img_width 1024 \
+  --img_height 1024 \
+  --precision bf16 \
+  --gpu
+```
+
+#### FLUX.1-schnell quantized version (Q4_0 GGUF)
+
+```bash
+poetry run imggenhub \
+  --prompt "A photorealistic restaurant scene: a single customer ordering food, a waiter presenting the menu, natural lighting, sharp focus, realistic textures" \
+  --diffusion_filename "flux1-schnell-Q4_0.gguf" \
+  --diffusion_repo_id "city96/FLUX.1-schnell-gguf" \
+  --steps 4 \
+  --guidance 0.8 \
+  --img_width 512 \
+  --img_height 512 \
+  --precision q4 \
+  --gpu
+```
+
+#### Stable diffusion XL with refiner 
+
+```bash
+poetry run imggenhub \
+  --prompt "photorealistic parliament building along river in summer" \
   --model_name stabilityai/stable-diffusion-xl-base-1.0 \
   --refiner_model_name stabilityai/stable-diffusion-xl-refiner-1.0 \
-  --gpu \
-  --prompt "photorealistic parliament building along river in summer" \
-  --guidance 8.0 --steps 30 \
-  --refiner_guidance 7.0 --refiner_steps 15 \
-  --precision fp16 --refiner_precision fp16 --two_stage_refiner
-```
-
-#### **Advanced photorealistic generation**
-```bash
-poetry run imggenhub \
-  --gpu \
-  --model_name "stabilityai/stable-diffusion-xl-base-1.0" \
-  --prompt "A highly detailed photorealistic portrait of a young woman with long flowing hair, professional studio lighting, sharp focus on eyes, cinematic composition, 8K resolution, masterpiece quality" \
-  --guidance 10.0 \
-  --steps 75 \
+  --guidance 8.0 \
+  --steps 30 \
+  --refiner_guidance 7.0 \
+  --refiner_steps 15 \
   --precision fp16 \
-  --negative_prompt "blurry, low quality, distorted, watermark, duplicate, multiple identical people, clones, repetition, cartoon, anime, painting, drawing, sketch, low resolution, pixelated, noisy, grainy, artifacts, overexposed, underexposed, bad anatomy, deformed, ugly, disfigured, poorly lit, bad composition" \
-  --dest "photorealistic_portrait"
+  --refiner_precision fp16 \
+  --two_stage_refiner \
+  --gpu
 ```
-*Output will be saved to: `output/photorealistic_portrait_YYYYMMDD_HHMMSS/`*
-
-#### **FLUX.1-schnell Q4 GGUF quantized generation**
-FLUX GGUF uses quantized models for faster generation with lower memory requirements:
-
-```bash
-poetry run imggenhub \
-  --model_name "flux-gguf-q4" \
-  --prompt "A beautiful landscape with mountains and a lake, photorealistic, high detail, cinematic lighting" \
-  --guidance 3.5 \
-  --steps 4 \
-  --precision q4 \
-  --img_width 1024 \
-  --img_height 1024
-```
-
-**FLUX GGUF Features:**
-- **Automatic GPU enforcement**: CPU mode not supported (too slow)
-- **Quantized Q4 model**: Reduced memory footprint
-- **Fast generation**: 4 steps typical
-- **Default image size**: 1024x1024 (customizable via `--img_width` and `--img_height`)
-- **Model sources**: Supports both Kaggle datasets (default) and direct HuggingFace download
-  - Set `MODEL_SOURCE=huggingface` and `HF_TOKEN=your_token` in `.env` for HF downloads
-
-*Output will be saved to: `output/output_images_YYYYMMDD_HHMMSS/` or custom destination with `--dest`*
 
 #### **All supported flags**
 - `--dest DEST`: Custom name prefix for the output folder (default: timestamp only)
