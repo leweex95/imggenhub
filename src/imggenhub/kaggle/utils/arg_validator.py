@@ -22,8 +22,14 @@ def is_flux_gguf_model(model_id: str) -> bool:
     return ('flux' in model_lower and ('gguf' in model_lower or 'q4' in model_lower or 'q8' in model_lower))
 
 def validate_args(args: Any):
-    if not args.model_name:
-        raise ValueError("--model_name is required")
+    # model_name is optional if diffusion parameters are provided (for FLUX GGUF models)
+    if not args.model_name and not (args.diffusion_repo_id or args.diffusion_filename):
+        raise ValueError("--model_name is required (or provide --diffusion_repo_id/--diffusion_filename for FLUX GGUF models)")
+    
+    # If diffusion parameters provided, infer model_name for FLUX GGUF
+    if not args.model_name and (args.diffusion_repo_id or args.diffusion_filename):
+        args.model_name = args.diffusion_repo_id or "flux-gguf-custom"
+    
     if not args.prompt and not args.prompts and not args.prompts_file:
         raise ValueError("No prompts provided")
     if args.img_width is None or args.img_height is None:
