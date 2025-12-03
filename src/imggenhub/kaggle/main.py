@@ -4,6 +4,7 @@ import subprocess
 import logging
 from pathlib import Path
 from imggenhub.kaggle.core import deploy, download
+from imggenhub.kaggle.core.parallel_deploy import run_parallel_pipeline, should_use_parallel
 from imggenhub.kaggle.utils import poll_status
 from imggenhub.kaggle.utils.prompts import resolve_prompts
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
@@ -36,7 +37,53 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
 
     logging.debug(f"Resolved paths:\n prompts_file={prompts_file}\n notebook={notebook}\n kernel_path={kernel_path}\n dest={dest_path}")
 
-    # Step 1: Deploy
+    # Check if parallel deployment should be used (prompts > 4)
+    if should_use_parallel(prompts_list):
+        logging.info("="*80)
+        logging.info(f"PARALLEL MODE: {len(prompts_list)} prompts detected (threshold: 4)")
+        logging.info("Splitting prompts across 2 Kaggle kernels for parallel execution")
+        logging.info("="*80)
+        
+        # Build deploy kwargs for parallel pipeline
+        deploy_kwargs = {
+            "model_id": model_name,
+            "gpu": gpu,
+            "refiner_model_id": refiner_model_name,
+            "guidance": guidance,
+            "steps": steps,
+            "precision": precision,
+            "negative_prompt": negative_prompt,
+            "output_dir": dest_path.name,
+            "two_stage_refiner": two_stage_refiner,
+            "refiner_guidance": refiner_guidance,
+            "refiner_steps": refiner_steps,
+            "refiner_precision": refiner_precision,
+            "refiner_negative_prompt": refiner_negative_prompt,
+            "hf_token": hf_token,
+            "img_size": img_size,
+            "diffusion_repo_id": diffusion_repo_id,
+            "diffusion_filename": diffusion_filename,
+            "vae_repo_id": vae_repo_id,
+            "vae_filename": vae_filename,
+            "clip_l_repo_id": clip_l_repo_id,
+            "clip_l_filename": clip_l_filename,
+            "t5xxl_repo_id": t5xxl_repo_id,
+            "t5xxl_filename": t5xxl_filename,
+        }
+        
+        run_parallel_pipeline(
+            dest_path=dest_path,
+            prompts_list=prompts_list,
+            notebook=notebook,
+            kernel_path=kernel_path,
+            **deploy_kwargs
+        )
+        
+        logging.info(f"Pipeline completed! Output saved to: {dest_path}")
+        logging.info("Check remaining GPU quota: https://www.kaggle.com/settings#quotas")
+        return
+
+    # Sequential deployment for 4 or fewer prompts
     logging.info("Deploying kernel...")
     # Pass only the run name (e.g., '20251115_182905') so the notebook can
     # prepend 'output/' itself and avoid creating nested output paths.

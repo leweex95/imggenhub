@@ -256,6 +256,9 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
 
         if result.stdout:
             logging.info(f"Kaggle push output: {result.stdout}")
+            # Check for errors in stdout (Kaggle CLI sometimes returns 0 even on errors)
+            if "error" in result.stdout.lower() or "maximum" in result.stdout.lower():
+                raise RuntimeError(f"Kaggle push failed: {result.stdout}")
         if result.stderr:
             logging.debug(f"Kaggle push stderr: {result.stderr}")
     except subprocess.CalledProcessError as exc:
