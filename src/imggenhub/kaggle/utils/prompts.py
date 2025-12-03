@@ -3,12 +3,10 @@ import json
 
 def resolve_prompts(prompts_file=None, prompt=None, prompts=None):
     """Return a list of prompts based on inputs"""
-    if prompt and prompts:
-        raise ValueError("Cannot set both --prompt and --prompts")
-
-    if prompt:
-        return [prompt]
     if prompts:
+        # Accept both a single string and a list of strings
+        if isinstance(prompts, str):
+            return [prompts]
         return prompts
 
     if prompts_file:
@@ -24,4 +22,4 @@ def resolve_prompts(prompts_file=None, prompt=None, prompts=None):
         else:
             raise FileNotFoundError(f"Prompts file not found: {prompts_file}")
 
-    raise ValueError("No prompts provided: specify --prompt, --prompts, or --prompts_file")
+    raise ValueError("No prompts provided: specify --prompts or --prompts_file")

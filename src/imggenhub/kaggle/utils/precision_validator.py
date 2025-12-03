@@ -82,4 +82,4 @@ class PrecisionValidator:
             if any(indicator in name for indicator in indicators):
                 return precision
 
-        return 'fp32'  # Default if no indicator found
+        return None  # No default; fail loudly if not found

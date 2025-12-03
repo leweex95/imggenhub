@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from imggenhub.kaggle.core import deploy, download
+from imggenhub.kaggle.core import deploy, download_selective
 from imggenhub.kaggle.utils import poll_status
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -180,7 +180,7 @@ def _download_kernel_output(kernel_id: str, dest_path: Path) -> None:
         dest_path: Destination directory
     """
     logging.info(f"Downloading output from kernel: {kernel_id}")
-    download.run(dest=dest_path, kernel_id=kernel_id)
+    download_selective.run(dest=dest_path, kernel_id=kernel_id)
 
 
 def run_parallel_pipeline(
