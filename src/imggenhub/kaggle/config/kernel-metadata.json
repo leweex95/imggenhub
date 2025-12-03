@@ -8,6 +8,7 @@
   "enable_gpu": "true",
   "enable_internet": "true",
   "dataset_sources": [
+    "leventecsibi/imggenhub-hf-token",
     "leventecsibi/flux1-schnell-q4-zip",
     "leventecsibi/vae-zip",
     "leventecsibi/clip-l-zip",

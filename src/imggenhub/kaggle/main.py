@@ -4,7 +4,9 @@ import subprocess
 import logging
 from pathlib import Path
 from imggenhub.kaggle.core import deploy, download
+from imggenhub.kaggle.core import download_selective
 from imggenhub.kaggle.core.parallel_deploy import run_parallel_pipeline, should_use_parallel
+from imggenhub.kaggle.secrets import sync_hf_token
 from imggenhub.kaggle.utils import poll_status
 from imggenhub.kaggle.utils.prompts import resolve_prompts
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
@@ -14,10 +16,21 @@ from imggenhub.kaggle.utils.arg_validator import validate_args
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_name=None, refiner_model_name=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None, img_size=None, diffusion_repo_id=None, diffusion_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None):
-    """Run Kaggle image generation pipeline: deploy -> poll -> download"""
+def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_name=None, refiner_model_name=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, diffusion_repo_id=None, diffusion_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None):
+    """Run Kaggle image generation pipeline: sync HF token -> deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
     cwd = Path(__file__).parent
+
+    # Sync HF token to Kaggle dataset before deployment
+    logging.info("Syncing HF token to Kaggle dataset...")
+    try:
+        updated = sync_hf_token()
+        if updated:
+            logging.info("HF token dataset updated successfully")
+        else:
+            logging.info("HF token dataset is already up-to-date")
+    except Exception as e:
+        raise RuntimeError(f"Failed to sync HF token: {e}") from e
 
     # Resolve paths
     if prompts_file:
@@ -59,7 +72,6 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             "refiner_steps": refiner_steps,
             "refiner_precision": refiner_precision,
             "refiner_negative_prompt": refiner_negative_prompt,
-            "hf_token": hf_token,
             "img_size": img_size,
             "diffusion_repo_id": diffusion_repo_id,
             "diffusion_filename": diffusion_filename,
@@ -104,7 +116,6 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         refiner_steps=refiner_steps,
         refiner_precision=refiner_precision,
         refiner_negative_prompt=refiner_negative_prompt,
-        hf_token=hf_token,
         img_size=img_size,
         diffusion_repo_id=diffusion_repo_id,
         diffusion_filename=diffusion_filename,
@@ -127,10 +138,14 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         logging.error(f"Kernel failed. See log: {log_path}")
         raise RuntimeError("Kaggle kernel failed during image generation. Aborting pipeline.")
 
-    # Step 3: Download output
-    logging.info("Downloading output artifacts...")
-    download.run(dest_path)
+    # Step 3: Download output (using selective downloader to get only images)
+    logging.info("Downloading output artifacts (images only)...")
+    kernel_id = "leventecsibi/stable-diffusion-batch-generator"
+    success = download_selective.run(kernel_id=kernel_id, dest=str(dest_path))
     logging.debug("Download completed")
+    
+    if not success:
+        logging.warning("Selective download did not complete successfully")
 
     logging.info(f"Pipeline completed! Output saved to: {dest_path}")
     logging.info("Check remaining GPU quota: https://www.kaggle.com/settings#quotas")
@@ -173,7 +188,6 @@ def main():
     parser.add_argument("--refiner_precision", type=str, default=None, choices=["fp32", "fp16", "bf16", "int8", "int4"],
                         help="Precision level for refiner (REQUIRED when using --refiner_model_name, or inherits from --precision)")
     parser.add_argument("--refiner_negative_prompt", type=str, default=None, help="Custom negative prompt for refiner (defaults to same as --negative_prompt)")
-    parser.add_argument("--hf_token", type=str, default=None, help="HuggingFace API token for accessing gated models (e.g., FLUX.1-schnell)")
     parser.add_argument("--img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     
@@ -188,31 +202,6 @@ def main():
     parser.add_argument("--t5xxl_filename", type=str, default=None, help="T5-XXL model filename")
 
     args = parser.parse_args()
-
-    # Load HF_TOKEN from .env file if not provided via CLI
-    if not args.hf_token:
-        import os
-        from pathlib import Path
-        import sys
-        
-        # Try to load from .env in the project root
-        env_path = Path(__file__).parent.parent.parent.parent / ".env"
-        if env_path.exists():
-            from dotenv import load_dotenv
-            load_dotenv(env_path)
-            args.hf_token = os.getenv("HF_TOKEN")
-            if args.hf_token:
-                print(f"[INFO] Loaded HF_TOKEN from .env file")
-        else:
-            # Try to load from current working directory
-            try:
-                from dotenv import load_dotenv
-                load_dotenv()
-                args.hf_token = os.getenv("HF_TOKEN")
-                if args.hf_token:
-                    print(f"[INFO] Loaded HF_TOKEN from .env in current directory")
-            except:
-                pass
 
     # Auto-detect notebook based on model type if not specified
     if args.notebook is None:
@@ -331,7 +320,6 @@ def main():
         refiner_steps=args.refiner_steps,
         refiner_precision=args.refiner_precision,
         refiner_negative_prompt=args.refiner_negative_prompt,
-        hf_token=args.hf_token,
         img_size=img_size,
         diffusion_repo_id=args.diffusion_repo_id,
         diffusion_filename=args.diffusion_filename,

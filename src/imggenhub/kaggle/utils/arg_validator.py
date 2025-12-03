@@ -1,6 +1,7 @@
 """
 Argument validation utilities for Kaggle image generation pipeline.
 """
+import os
 from typing import Any
 
 def is_kaggle_model(model_id: str) -> bool:
@@ -58,7 +59,8 @@ def validate_args(args: Any):
             pass
         else:
             from imggenhub.kaggle.utils.precision_validator import PrecisionValidator
-            detector = PrecisionValidator(args.hf_token)
+            hf_token = os.getenv("HF_TOKEN", "")
+            detector = PrecisionValidator(hf_token)
             available_variants = detector.detect_available_variants(args.model_name)
             if args.precision not in available_variants:
                 available_str = ", ".join(available_variants) if available_variants else "none"
@@ -71,7 +73,8 @@ def validate_args(args: Any):
             pass
         else:
             from imggenhub.kaggle.utils.precision_validator import PrecisionValidator
-            detector = PrecisionValidator(args.hf_token)
+            hf_token = os.getenv("HF_TOKEN", "")
+            detector = PrecisionValidator(hf_token)
             available_variants = detector.detect_available_variants(refiner_model)
             if args.refiner_precision not in available_variants:
                 available_str = ", ".join(available_variants) if available_variants else "none"

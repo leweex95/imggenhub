@@ -14,30 +14,30 @@ ImgGenHub is a personal image generation hub that connects to web-based image ge
 
 #### **Kaggle-powered image generation**
 - **Automated pipeline**: Deploy → Monitor → Download workflow
-- **GPU/CPU support**: Configurable hardware acceleration via Kaggle's free GPUs (30 hours/week)
-- **Multiple models**: Support for popular Stable Diffusion variants and Flux.1-schnell quantized (Q4) version
-- **Flexible prompting**: Command-line prompts or JSON file batch processing
+- **Automated secret management**: Local `.env` secret detected and auto-uploaded to Kaggle dataset
+- **Multiple models**: Supports Stable Diffusion variants, Flux.1-schnell GGUF quantized (Q4) version and Flux.1-schnell bf16 version.
+
+#### **Vast.ai support** (todo)
+
+_Planned in Dec 2025 / Jan 2026._
 
 ---
 
 ## Requirements
 
-- **Python**: 3.11 or higher
-- **Poetry**: For dependency management  
-- **Kaggle Account**: With API credentials configured
-- **Git**: For repository management
+- **3.11+ Python** and **Poetry**  
+- **Kaggle Account**: with API credentials
+- **HuggingFace token**: for accessing gated models (e.g., FLUX.1-schnell)
 
 ---
 
 ## Usage
 
-### **Local usage**
-
-#### Using FLUX.1-schnell
+### Using FLUX.1-schnell
 
 [FLUX.1-schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell) is commercially usable. The full fp32 model doesn't fit into our available VRAM on Kaggle kernels but its lossless bf16 compression does. 
 
-#### FLUX.1-schnell with bf16
+### FLUX.1-schnell with bf16
 
 ```bash
 poetry run imggenhub \
@@ -51,7 +51,7 @@ poetry run imggenhub \
   --gpu
 ```
 
-#### FLUX.1-schnell quantized version (Q4_0 GGUF)
+### FLUX.1-schnell quantized version (Q4_0 GGUF)
 
 ```bash
 poetry run imggenhub \
@@ -66,7 +66,7 @@ poetry run imggenhub \
   --gpu
 ```
 
-#### Stable diffusion XL with refiner 
+### Stable diffusion XL with refiner 
 
 ```bash
 poetry run imggenhub \
@@ -83,7 +83,7 @@ poetry run imggenhub \
   --gpu
 ```
 
-#### **All supported flags**
+### **Supported flags**
 - `--dest DEST`: Custom name prefix for the output folder (default: timestamp only)
 - Outputs are always saved under `output/` with automatic timestamping
 - All logs from the generation process are saved in the same folder as the images
@@ -91,10 +91,10 @@ poetry run imggenhub \
 - `--prompts_file`: JSON file with multiple prompts  
 - `--model_name`: Hugging Face model ID
 - `--refiner_model_name`: SDXL refiner model for enhanced photorealism
-- `--gpu`: Enable GPU acceleration
+- `--gpu`: Enable GPU acceleration (required for FLUX.1 models)
 - `--precision`: Model precision (fp32/fp16/int8/int4)
 - `--guidance`: Prompt adherence strength (7-12 recommended for photorealism)
-- `--steps`: Inference steps (50-100 for quality)
+- `--steps`: Inference steps (50-100 for stable diffusion models, ~4 for FLUX)
 - `--negative_prompt`: Quality control prompts
 - `--two_stage_refiner`: Use VRAM-optimized two-stage approach (base → unload → refiner)
 - `--refiner_guidance`: Guidance scale for refiner (defaults to same as --guidance)

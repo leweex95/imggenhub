@@ -6,7 +6,7 @@ import shutil
 import os
 import sys
 import time
-from typing import List
+from typing import List, Optional
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -14,10 +14,11 @@ KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
 
 # Monitoring configuration (tunable for tests)
 DOWNLOAD_TIMEOUT = 60   # seconds
-CHECK_INTERVAL = 5      # seconds
-QUIET_PERIOD = 15       # seconds with no new images before stopping the CLI
+CHECK_INTERVAL = 1      # seconds - check more frequently for image availability
+QUIET_PERIOD = 5        # seconds with no new images before stopping the CLI
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg")
+EXPECTED_IMAGE_COUNT: Optional[int] = None  # Set by caller if known in advance
 
 
 def _list_image_files(dest_path: Path) -> List[Path]:
@@ -53,9 +54,12 @@ def _move_images_to_final_folder(dest_path: Path, folder_name: str = "images") -
 
 
 def run(dest="output_images", kernel_id=None):
-    """Download ONLY image files from Kaggle kernel into a flat folder.
+    """Download ONLY image files from Kaggle kernel, terminating immediately after.
 
-    Final structure: dest/IMAGE_FILES_ONLY (no subfolders, no binaries).
+    Monitors for image files and exits the Kaggle CLI as soon as they are available.
+    This prevents unnecessary downloads of CMake, binaries, and other non-image artifacts.
+
+    Final structure: dest/images/IMAGE_FILES_ONLY (flat folder, no subfolders).
     """
     kernel_id = kernel_id or KERNEL_ID
     dest_path = Path(dest)
@@ -81,13 +85,13 @@ def run(dest="output_images", kernel_id=None):
     )
 
     start_time = time.time()
-    last_image_activity = None
-    images_detected = False
+    last_image_count = 0
+    last_image_time = time.time()
 
     def _terminate_process():
         if process.poll() is not None:
             return
-        logging.info("Stopping Kaggle CLI download process...")
+        logging.info("Terminating Kaggle CLI download process...")
         process.terminate()
         try:
             process.wait(timeout=5)
@@ -98,35 +102,37 @@ def run(dest="output_images", kernel_id=None):
     try:
         while True:
             current_images = _list_image_files(dest_path)
-            if current_images:
-                latest_mtime = max(image.stat().st_mtime for image in current_images)
-                if not images_detected:
-                    logging.info(
-                        "Image files detected locally. Waiting up to %s seconds for additional prompts to finish...",
-                        QUIET_PERIOD,
-                    )
-                images_detected = True
-                last_image_activity = latest_mtime
+            image_count = len(current_images)
+
+            if image_count > 0:
+                if image_count > last_image_count:
+                    # New images detected
+                    logging.info(f"Detected {image_count} image file(s): {[img.name for img in current_images]}")
+                    last_image_count = image_count
+                    last_image_time = time.time()
 
             now = time.time()
 
-            if images_detected and last_image_activity and (now - last_image_activity) >= QUIET_PERIOD:
-                logging.info(
-                    "No new image files detected in the last %s seconds. Assuming download complete.",
-                    QUIET_PERIOD,
-                )
-                _terminate_process()
-                break
-
+            # Exit conditions (in priority order)
+            
+            # 1. Process already finished
             retcode = process.poll()
             if retcode is not None:
                 logging.info(f"Kaggle CLI finished with return code {retcode}")
                 break
 
+            # 2. Images detected and stable (no new images for QUIET_PERIOD seconds)
+            if image_count > 0 and (now - last_image_time) >= QUIET_PERIOD:
+                logging.info(
+                    f"Images stable: {image_count} file(s) unchanged for {QUIET_PERIOD}s. Terminating download."
+                )
+                _terminate_process()
+                break
+
+            # 3. Hard timeout reached
             if now - start_time >= DOWNLOAD_TIMEOUT:
                 logging.warning(
-                    "Kaggle CLI still running after %s seconds, terminating process",
-                    DOWNLOAD_TIMEOUT,
+                    f"Kaggle CLI running for {DOWNLOAD_TIMEOUT}s, terminating to save bandwidth"
                 )
                 _terminate_process()
                 break

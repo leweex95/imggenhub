@@ -2,7 +2,6 @@ import subprocess
 import time
 import re
 import logging
-import shutil
 import sys
 from pathlib import Path
 
@@ -57,43 +56,10 @@ def run(kernel_id=None, poll_interval=None):
 
         if status.lower() in ["kernelworkerstatus.complete", "kernelworkerstatus.error"]:
             logging.info("Kernel finished with status: %s", status)
-            
-            # Fetch and display logs
-            fetch_kernel_logs(kernel_id)
-            
             return status.lower()
 
         time.sleep(poll_interval)
 
-
-def fetch_kernel_logs(kernel_id=None):
-    """Fetch and display Kaggle kernel logs"""
-    kernel_id = kernel_id or KERNEL_ID
-    logging.info("="*80)
-    logging.info("Fetching kernel logs from Kaggle...")
-    logging.info("="*80)
-    
-    try:
-        kaggle_cmd = _get_kaggle_command()
-        result = subprocess.run(
-            [*kaggle_cmd, "kernels", "output", kernel_id, "--quiet"],
-            capture_output=True, text=True, encoding='utf-8', timeout=60
-        )
-        
-        if result.returncode == 0:
-            # Look for log file in output
-            log_content = result.stdout
-            if log_content:
-                logging.info("KERNEL LOGS:")
-                logging.info("-"*80)
-                for line in log_content.strip().split('\n'):
-                    logging.info(line)
-                logging.info("-"*80)
-        else:
-            logging.warning(f"Failed to fetch logs: {result.stderr.strip()}")
-            
-    except Exception as e:
-        logging.warning(f"Exception while fetching logs: {e}")
 
 def _get_kaggle_command():
     """
@@ -102,6 +68,8 @@ def _get_kaggle_command():
     Returns:
         list: Command parts to execute kaggle CLI
     """
+    import shutil
+    
     # Check if poetry is available and we're in a poetry project
     def find_pyproject_toml():
         current = Path.cwd()
