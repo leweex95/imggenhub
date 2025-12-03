@@ -41,8 +41,8 @@ _Planned in Dec 2025 / Jan 2026._
 
 ```bash
 poetry run imggenhub \
-  --prompt "A photorealistic restaurant scene: a single customer ordering food, a waiter presenting the menu, natural lighting, sharp focus, realistic textures" \
-  --model_name "black-forest-labs/FLUX.1-schnell" \
+  --prompts "photorealistic indoor restaurant scene" \
+  --model_id "black-forest-labs/FLUX.1-schnell" \
   --steps 4 \
   --guidance 0.75 \
   --img_width 1024 \
@@ -55,9 +55,9 @@ poetry run imggenhub \
 
 ```bash
 poetry run imggenhub \
-  --prompt "A photorealistic restaurant scene: a single customer ordering food, a waiter presenting the menu, natural lighting, sharp focus, realistic textures" \
-  --diffusion_filename "flux1-schnell-Q4_0.gguf" \
-  --diffusion_repo_id "city96/FLUX.1-schnell-gguf" \
+  --prompts "photorealistic indoor restaurant scene" \
+  --model_id "city96/FLUX.1-schnell-gguf" \
+  --model_filename "flux1-schnell-Q4_0.gguf" \
   --steps 4 \
   --guidance 0.8 \
   --img_width 512 \
@@ -70,39 +70,59 @@ poetry run imggenhub \
 
 ```bash
 poetry run imggenhub \
-  --prompt "photorealistic parliament building along river in summer" \
-  --model_name stabilityai/stable-diffusion-xl-base-1.0 \
-  --refiner_model_name stabilityai/stable-diffusion-xl-refiner-1.0 \
-  --guidance 8.0 \
+  --prompts "photorealistic indoor restaurant scene" \
+  --model_id stabilityai/stable-diffusion-xl-base-1.0 \
+  --refiner_model_id stabilityai/stable-diffusion-xl-refiner-1.0 \
   --steps 30 \
-  --refiner_guidance 7.0 \
-  --refiner_steps 15 \
+  --guidance 8.0 \
   --precision fp16 \
+  --refiner_steps 15 \
+  --refiner_guidance 7.0 \
   --refiner_precision fp16 \
-  --two_stage_refiner \
   --gpu
 ```
 
 ### **Supported flags**
-- `--dest DEST`: Custom name prefix for the output folder (default: timestamp only)
-- Outputs are always saved under `output/` with automatic timestamping
-- All logs from the generation process are saved in the same folder as the images
-- `--prompt`: Single prompt string
+
+#### **General flags** (all models)
+- `--prompts`: Single prompt string or list of strings
 - `--prompts_file`: JSON file with multiple prompts  
-- `--model_name`: Hugging Face model ID
-- `--refiner_model_name`: SDXL refiner model for enhanced photorealism
 - `--gpu`: Enable GPU acceleration (required for FLUX.1 models)
-- `--precision`: Model precision (fp32/fp16/int8/int4)
-- `--guidance`: Prompt adherence strength (7-12 recommended for photorealism)
-- `--steps`: Inference steps (50-100 for stable diffusion models, ~4 for FLUX)
+- `--steps`: Inference steps (50-100 for Stable Diffusion models, ~4 for FLUX)
+- `--guidance`: Prompt adherence strength (7-12 recommended for photorealism, 0.75-1.0 for FLUX)
+- `--precision`: Model precision (fp32/fp16/int8/int4 for base models; q4/q5/q6 for GGUF quantized models)
+- `--img_width` / `--img_height`: Image dimensions (must be multiples of 64)
 - `--negative_prompt`: Quality control prompts
-- `--two_stage_refiner`: Use VRAM-optimized two-stage approach (base → unload → refiner)
-- `--refiner_guidance`: Guidance scale for refiner (defaults to same as --guidance)
-- `--refiner_steps`: Inference steps for refiner (defaults to 20)
-- `--refiner_precision`: Precision for refiner (defaults to same as --precision)
-- `--refiner_negative_prompt`: Negative prompt for refiner (defaults to same as --negative_prompt)
+- `--dest DEST`: Custom name prefix for the output folder (default: timestamp only)
 - `--notebook`: Custom notebook path
 - `--kernel_path`: Kaggle kernel configuration directory
+- Outputs are always saved under `output/` with automatic timestamping
+- All logs from the generation process are saved in the same folder as the images
+
+#### **Stable Diffusion XL flags** (model_id: "stabilityai/*")
+- `--model_id`: Hugging Face model ID (e.g., `stabilityai/stable-diffusion-xl-base-1.0`)
+- `--refiner_model_id`: SDXL refiner model for enhanced photorealism (e.g., `stabilityai/stable-diffusion-xl-refiner-1.0`)
+- `--refiner_steps`: Inference steps for refiner (defaults to 20)
+- `--refiner_guidance`: Guidance scale for refiner (defaults to same as --guidance)
+- `--refiner_precision`: Precision for refiner (defaults to same as --precision)
+- `--refiner_negative_prompt`: Negative prompt for refiner (defaults to same as --negative_prompt)
+
+#### **FLUX.1-schnell bf16 flags** (model_id: "black-forest-labs/FLUX.1-schnell")
+- `--model_id`: Must be `"black-forest-labs/FLUX.1-schnell"`
+
+Note: Refiner-related flags are ignored for FLUX models
+
+#### **FLUX.1-schnell GGUF (quantized) flags** (model_id: "city96/FLUX.1-schnell-gguf")
+- `--model_id`: Hugging Face repository containing quantized model (e.g., `city96/FLUX.1-schnell-gguf`)
+- `--model_filename`: GGUF model filename (e.g., `flux1-schnell-Q4_0.gguf`)
+- `--vae_repo_id`: VAE model repository (auto-resolved if not specified)
+- `--vae_filename`: VAE model filename (auto-resolved if not specified)
+- `--clip_l_repo_id`: CLIP-L component repository (auto-resolved if not specified)
+- `--clip_l_filename`: CLIP-L component filename (auto-resolved if not specified)
+- `--t5xxl_repo_id`: T5-XXL component repository (auto-resolved if not specified)
+- `--t5xxl_filename`: T5-XXL component filename (auto-resolved if not specified)
+
+Note: Refiner-related flags are ignored for FLUX models
 
 ## Custom Kaggle datasets
 
