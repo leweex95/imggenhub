@@ -3,7 +3,7 @@ import logging
 from imggenhub.kaggle import main
 
 def test_run_pipeline_success():
-    with patch('imggenhub.kaggle.main.download_selective.run', return_value=True) as mock_download, \
+    with patch('imggenhub.kaggle.main.download.run', return_value=True) as mock_download, \
          patch('imggenhub.kaggle.main.poll_status.run', return_value='kernelworkerstatus.complete') as mock_poll, \
          patch('imggenhub.kaggle.main.deploy.run') as mock_deploy, \
          patch('imggenhub.kaggle.main.resolve_prompts', return_value=['prompt']) as mock_resolve, \
@@ -27,7 +27,7 @@ def test_run_pipeline_success():
         assert mock_download.called
 
 def test_run_pipeline_kernel_error():
-    with patch('imggenhub.kaggle.main.download_selective.run', return_value=True) as mock_download, \
+    with patch('imggenhub.kaggle.main.download.run', return_value=True) as mock_download, \
          patch('imggenhub.kaggle.main.poll_status.run', return_value='kernelworkerstatus.error') as mock_poll, \
          patch('imggenhub.kaggle.main.deploy.run') as mock_deploy, \
          patch('imggenhub.kaggle.main.resolve_prompts', return_value=['prompt']) as mock_resolve, \

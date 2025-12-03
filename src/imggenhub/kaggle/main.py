@@ -3,8 +3,8 @@ import argparse
 import subprocess
 import logging
 from pathlib import Path
-from imggenhub.kaggle.core import deploy, download_selective
-from imggenhub.kaggle.core import download_selective
+from imggenhub.kaggle.core import deploy, download
+from imggenhub.kaggle.core import download
 from imggenhub.kaggle.core.parallel_deploy import run_parallel_pipeline, should_use_parallel
 from imggenhub.kaggle.secrets import sync_hf_token
 from imggenhub.kaggle.utils import poll_status
@@ -137,7 +137,7 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     # Step 3: Download output (using selective downloader to get only images)
     logging.info("Downloading output artifacts (images only)...")
     kernel_id = "leventecsibi/stable-diffusion-batch-generator"
-    success = download_selective.run(kernel_id=kernel_id, dest=str(dest_path))
+    success = download.run(kernel_id=kernel_id, dest=str(dest_path))
     logging.debug("Download completed")
     
     if not success:

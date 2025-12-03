@@ -3,7 +3,7 @@ import shutil
 import tempfile
 from pathlib import Path
 import pytest
-from imggenhub.kaggle.core import download_selective
+from imggenhub.kaggle.core import download
 
 def create_fake_image_files(dest_path, count=3):
     dest_path.mkdir(parents=True, exist_ok=True)
@@ -20,7 +20,7 @@ def create_fake_non_image_files(dest_path):
 
 def test_list_local_image_files(tmp_path):
     create_fake_image_files(tmp_path, 2)
-    files = download_selective._list_local_image_files(tmp_path)
+    files = download._list_local_image_files(tmp_path)
     assert files == {"img_0.png", "img_1.png"}
 
 def test_handle_remove_readonly(tmp_path):
@@ -28,7 +28,7 @@ def test_handle_remove_readonly(tmp_path):
     file_path.write_text("readonly")
     os.chmod(file_path, 0o444)
     # Should not raise
-    download_selective._handle_remove_readonly(os.remove, str(file_path), None)
+    download._handle_remove_readonly(os.remove, str(file_path), None)
     assert not file_path.exists()
 
 def test_run_success_images(monkeypatch, tmp_path):
@@ -49,9 +49,9 @@ def test_run_success_images(monkeypatch, tmp_path):
                 self._terminated = True
         called['popen'] = True
         return FakeProc()
-    monkeypatch.setattr(download_selective, 'subprocess', download_selective.subprocess)
-    monkeypatch.setattr(download_selective.subprocess, 'Popen', fake_popen)
-    monkeypatch.setattr(download_selective, '_get_kaggle_command', lambda: ['echo'])
+    monkeypatch.setattr(download, 'subprocess', download.subprocess)
+    monkeypatch.setattr(download.subprocess, 'Popen', fake_popen)
+    monkeypatch.setattr(download, '_get_kaggle_command', lambda: ['echo'])
     # Simulate images appearing
     def fake_list_local_image_files(dest_path):
         if not hasattr(fake_list_local_image_files, 'called'):
@@ -60,8 +60,8 @@ def test_run_success_images(monkeypatch, tmp_path):
         if fake_list_local_image_files.called < 3:
             return set()
         return {"img_0.png", "img_1.png"}
-    monkeypatch.setattr(download_selective, '_list_local_image_files', fake_list_local_image_files)
-    assert download_selective.run(dest=str(tmp_path))
+    monkeypatch.setattr(download, '_list_local_image_files', fake_list_local_image_files)
+    assert download.run(dest=str(tmp_path))
 
 def test_run_removes_non_images(monkeypatch, tmp_path):
     # Simulate images and non-image files, ensure non-images are removed
@@ -76,16 +76,16 @@ def test_run_removes_non_images(monkeypatch, tmp_path):
             self._terminated = True
         def kill(self):
             self._terminated = True
-    monkeypatch.setattr(download_selective, 'subprocess', download_selective.subprocess)
-    monkeypatch.setattr(download_selective.subprocess, 'Popen', lambda *a, **k: FakeProc())
-    monkeypatch.setattr(download_selective, '_get_kaggle_command', lambda: ['echo'])
+    monkeypatch.setattr(download, 'subprocess', download.subprocess)
+    monkeypatch.setattr(download.subprocess, 'Popen', lambda *a, **k: FakeProc())
+    monkeypatch.setattr(download, '_get_kaggle_command', lambda: ['echo'])
     # Simulate images and non-images
     def fake_list_local_image_files(dest_path):
         return {"img_0.png", "img_1.png"}
-    monkeypatch.setattr(download_selective, '_list_local_image_files', fake_list_local_image_files)
+    monkeypatch.setattr(download, '_list_local_image_files', fake_list_local_image_files)
     create_fake_image_files(tmp_path, 2)
     create_fake_non_image_files(tmp_path)
-    assert download_selective.run(dest=str(tmp_path))
+    assert download.run(dest=str(tmp_path))
     # Only allowed non-image files remain
     allowed = {"cli_command.txt", "stable-diffusion-batch-generator.log", "img_0.png", "img_1.png"}
     found = {p.name for p in tmp_path.rglob("*") if p.is_file()}
