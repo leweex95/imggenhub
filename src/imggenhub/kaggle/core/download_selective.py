@@ -5,6 +5,9 @@ Exits immediately once all expected images are downloaded, preventing unnecessar
 CMake and binary files from being transferred.
 """
 import logging
+import os
+import shutil
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -15,12 +18,13 @@ logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
+ALLOWED_NON_IMAGE_FILES = {"cli_command.txt", "stable-diffusion-batch-generator.log"}
+ARTIFACT_DIRECTORIES = {"stable-diffusion.cpp"}
 
 
 def _get_kaggle_command() -> List[str]:
     """Get the appropriate command to invoke Kaggle CLI."""
     import sys
-    import shutil
     
     def find_pyproject_toml():
         current = Path.cwd()
@@ -42,6 +46,15 @@ def _get_kaggle_command() -> List[str]:
             pass
     
     return [sys.executable, "-m", "kaggle.cli"]
+
+
+def _handle_remove_readonly(func, path, exc_info):
+    """Force-remove read-only files during rmtree."""
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception as err:
+        logger.warning(f"Failed to delete artifact component {path}: {err}")
 
 
 def _list_local_image_files(dest_path: Path) -> Set[str]:
@@ -86,7 +99,8 @@ def run(kernel_id: str = KERNEL_ID, dest: str = "output_images") -> bool:
     start_time = time.time()
     timeout_seconds = 120
     check_interval = 1
-    stable_threshold = 5  # seconds of no new images before we exit
+    stable_threshold = 2  # seconds of no new images before we exit
+    required_stable_checks = 1
     consecutive_stable_checks = 0
     last_image_count = 0
     last_new_image_time = None
@@ -111,7 +125,7 @@ def run(kernel_id: str = KERNEL_ID, dest: str = "output_images") -> bool:
                         elapsed = time.time() - last_new_image_time
                         if elapsed >= stable_threshold:
                             consecutive_stable_checks += 1
-                            if consecutive_stable_checks >= 2:
+                            if consecutive_stable_checks >= required_stable_checks:
                                 # Images are stable - exit now
                                 logger.info(
                                     f"✓ All {current_count} image(s) stable for {stable_threshold}s. "
@@ -123,20 +137,48 @@ def run(kernel_id: str = KERNEL_ID, dest: str = "output_images") -> bool:
                                 except subprocess.TimeoutExpired:
                                     process.kill()
                                 
-                                # Verify only images exist
+                                # Verify only images (plus expected metadata) remain
                                 all_files = list(dest_path.rglob("*"))
-                                non_image_files = [
-                                    f for f in all_files
-                                    if f.is_file() and f.suffix.lower() not in IMAGE_EXTENSIONS
-                                ]
-                                
-                                if non_image_files:
-                                    logger.warning(
-                                        f"⚠ Found {len(non_image_files)} non-image file(s) "
-                                        f"(should be none): {[f.name for f in non_image_files[:3]]}"
+                                residual_files = []
+                                for detected in all_files:
+                                    if not detected.is_file():
+                                        continue
+                                    if detected.suffix.lower() in IMAGE_EXTENSIONS:
+                                        continue
+                                    if detected.name in ALLOWED_NON_IMAGE_FILES:
+                                        continue
+                                    residual_files.append(detected)
+
+                                if residual_files:
+                                    for extra in residual_files:
+                                        try:
+                                            extra.unlink()
+                                            logger.info(f"Deleted non-image artifact: {extra.name}")
+                                        except Exception as err:
+                                            logger.warning(f"Could not delete {extra}: {err}")
+                                    logger.info(
+                                        f"Removed {len(residual_files)} non-image artifact(s) after download kill."
                                     )
                                 else:
                                     logger.info("✓ Confirmed: ONLY image files downloaded, no CMake/artifacts.")
+
+                                for artifact_dir in ARTIFACT_DIRECTORIES:
+                                    dir_path = dest_path / artifact_dir
+                                    if not dir_path.exists():
+                                        continue
+                                    try:
+                                        shutil.rmtree(
+                                            dir_path,
+                                            ignore_errors=False,
+                                            onerror=_handle_remove_readonly,
+                                        )
+                                    except Exception as err:
+                                        logger.warning(f"Failed to remove artifact directory {artifact_dir}: {err}")
+                                        continue
+                                    if dir_path.exists():
+                                        logger.warning(f"Artifact directory still present: {artifact_dir}")
+                                    else:
+                                        logger.info(f"Removed artifact directory: {artifact_dir}")
                                 
                                 return True
             
