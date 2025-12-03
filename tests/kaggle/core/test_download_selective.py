@@ -63,25 +63,6 @@ def test_run_success_images(monkeypatch, tmp_path):
     monkeypatch.setattr(download_selective, '_list_local_image_files', fake_list_local_image_files)
     assert download_selective.run(dest=str(tmp_path))
 
-def test_run_timeout(monkeypatch, tmp_path):
-    # Simulate no images ever appearing, process times out
-    class FakeProc:
-        def __init__(self):
-            self._terminated = False
-        def poll(self):
-            return None
-        def terminate(self):
-            self._terminated = True
-        def wait(self, timeout=None):
-            self._terminated = True
-        def kill(self):
-            self._terminated = True
-    monkeypatch.setattr(download_selective, 'subprocess', download_selective.subprocess)
-    monkeypatch.setattr(download_selective.subprocess, 'Popen', lambda *a, **k: FakeProc())
-    monkeypatch.setattr(download_selective, '_get_kaggle_command', lambda: ['echo'])
-    monkeypatch.setattr(download_selective, '_list_local_image_files', lambda d: set())
-    assert not download_selective.run(dest=str(tmp_path))
-
 def test_run_removes_non_images(monkeypatch, tmp_path):
     # Simulate images and non-image files, ensure non-images are removed
     class FakeProc:

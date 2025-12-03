@@ -1,112 +1,50 @@
 import pytest
-from types import SimpleNamespace
+from unittest.mock import patch, MagicMock
+from imggenhub.kaggle.utils.arg_validator import is_kaggle_model, is_flux_gguf_model, validate_args
 
-# Image dimension validation tests (migrated from test_image_dimension_validation.py)
-def test_invalid_flux_dimensions():
-    args = SimpleNamespace(
-        model_id="flux-gguf-q4",
-        prompts=["test"],
-        prompts_file=None,
-        img_width=500,
-        img_height=250,
-        steps=10,
-        guidance=7.5,
-        precision="fp16",
-        refiner_model_id=None,
-        refiner_guidance=None,
-        refiner_steps=None,
-        refiner_precision=None,
-        refiner_negative_prompt=None,
-        gpu=True,
-        notebook=None,
-        kernel_path=None,
-        dest=None,
-        output_base_dir=None,
-        negative_prompt=None,
-        hf_token=None,
-        refiner_model=None
-    )
-    with pytest.raises(ValueError, match="FLUX models require image dimensions divisible by 16"):
-        validate_args(args)
+class TestValidateArgs:
+    # ...existing code...
 
-def test_invalid_sd_dimensions():
-    args = SimpleNamespace(
-        model_id="stabilityai/stable-diffusion-xl",
-        prompts=["test"],
-        prompts_file=None,
-        img_width=500,
-        img_height=250,
-        steps=10,
-        guidance=7.5,
-        precision="fp16",
-        refiner_model_id=None,
-        refiner_guidance=None,
-        refiner_steps=None,
-        refiner_precision=None,
-        refiner_negative_prompt=None,
-        gpu=True,
-        notebook=None,
-        kernel_path=None,
-        dest=None,
-        output_base_dir=None,
-        negative_prompt=None,
-        hf_token=None,
-        refiner_model=None
+    @pytest.mark.parametrize(
+        "model_id,img_width,img_height,expected_error,expected_msg",
+        [
+            ("flux-gguf-q4", 500, 250, True, "FLUX models require image dimensions divisible by 16"),
+            ("stabilityai/stable-diffusion-xl", 500, 250, True, "Stable Diffusion models require image dimensions divisible by 8"),
+            ("flux-gguf-q4", 512, 512, False, None),
+            ("stabilityai/stable-diffusion-xl", 512, 512, False, None),
+        ]
     )
-    with pytest.raises(ValueError, match="Stable Diffusion models require image dimensions divisible by 8"):
-        validate_args(args)
+    def test_image_dimension_validation(self, model_id, img_width, img_height, expected_error, expected_msg):
+        args = MagicMock()
+        args.model_id = model_id
+        args.prompts = ["test"]
+        args.prompts_file = None
+        args.img_width = img_width
+        args.img_height = img_height
+        args.steps = 10
+        args.guidance = 7.5
+        args.precision = "fp16"
+        args.refiner_model_id = None
+        args.refiner_guidance = None
+        args.refiner_steps = None
+        args.refiner_precision = None
+        args.refiner_negative_prompt = None
+        args.gpu = True
+        args.notebook = None
+        args.kernel_path = None
+        args.dest = None
+        args.output_base_dir = None
+        args.negative_prompt = None
+        args.hf_token = None
+        args.refiner_model = None
+        if expected_error:
+            with pytest.raises(ValueError, match=expected_msg):
+                validate_args(args)
+        else:
+            validate_args(args)
 
-def test_valid_flux_dimensions():
-    args = SimpleNamespace(
-        model_id="flux-gguf-q4",
-        prompts=["test"],
-        prompts_file=None,
-        img_width=512,
-        img_height=512,
-        steps=10,
-        guidance=7.5,
-        precision="fp16",
-        refiner_model_id=None,
-        refiner_guidance=None,
-        refiner_steps=None,
-        refiner_precision=None,
-        refiner_negative_prompt=None,
-        gpu=True,
-        notebook=None,
-        kernel_path=None,
-        dest=None,
-        output_base_dir=None,
-        negative_prompt=None,
-        hf_token=None,
-        refiner_model=None
-    )
-    validate_args(args)  # Should not raise
 
-def test_valid_sd_dimensions():
-    args = SimpleNamespace(
-        model_id="stabilityai/stable-diffusion-xl",
-        prompts=["test"],
-        prompts_file=None,
-        img_width=512,
-        img_height=512,
-        steps=10,
-        guidance=7.5,
-        precision="fp16",
-        refiner_model_id=None,
-        refiner_guidance=None,
-        refiner_steps=None,
-        refiner_precision=None,
-        refiner_negative_prompt=None,
-        gpu=True,
-        notebook=None,
-        kernel_path=None,
-        dest=None,
-        output_base_dir=None,
-        negative_prompt=None,
-        hf_token=None,
-        refiner_model=None
-    )
-    validate_args(args)  # Should not raise
+
 import pytest
 from unittest.mock import patch, MagicMock
 from imggenhub.kaggle.utils.arg_validator import is_kaggle_model, is_flux_gguf_model, validate_args
@@ -302,17 +240,17 @@ class TestValidateArgs:
         with pytest.raises(ValueError, match="--model_id is required"):
             validate_args(args)
 
-    def test_missing_model_id_with_diffusion_repo_sets_model_id(self):
-        """Test that missing model_id with diffusion_repo_id sets model_id."""
+    def test_missing_model_id_with_diffusion_repo_raises_error(self):
+        """Test that missing model_id with diffusion_repo_id raises error."""
         args = self.create_mock_args(model_id=None, diffusion_repo_id="city96/FLUX.1-schnell-gguf")
-        validate_args(args)
-        assert args.model_id == "city96/FLUX.1-schnell-gguf"
+        with pytest.raises(ValueError, match="--model_id is required"):
+            validate_args(args)
 
-    def test_missing_model_id_with_diffusion_filename_sets_default(self):
-        """Test that missing model_id with diffusion_filename sets default."""
+    def test_missing_model_id_with_diffusion_filename_raises_error(self):
+        """Test that missing model_id with diffusion_filename raises error."""
         args = self.create_mock_args(model_id=None, diffusion_filename="flux1-schnell-Q4_0.gguf")
-        validate_args(args)
-        assert args.model_id == "flux-gguf-custom"
+        with pytest.raises(ValueError, match="--model_id is required"):
+            validate_args(args)
 
     def test_model_filename_without_model_id_raises_error(self):
         """Test that model_filename without model_id raises error."""
