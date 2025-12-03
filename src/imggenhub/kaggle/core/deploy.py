@@ -207,9 +207,9 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
         kernel_meta["dataset_sources"] = [HF_TOKEN_DATASET]
         print(f"[INFO] Attached HF token dataset for {notebook_path.name}")
     else:
-        # Stable diffusion notebooks don't need HF token
-        kernel_meta["dataset_sources"] = []
-        print(f"[INFO] No datasets needed for {notebook_path.name}")
+        # Stable diffusion notebooks now read HF token from dataset as well
+        kernel_meta["dataset_sources"] = [HF_TOKEN_DATASET]
+        print(f"[INFO] Attached HF token dataset for {notebook_path.name}")
     logging.info(f"Updated kernel metadata to use notebook: {notebook}")
     
     with open(metadata_path, "w", encoding="utf-8") as f:
