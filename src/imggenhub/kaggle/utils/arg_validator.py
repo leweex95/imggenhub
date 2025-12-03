@@ -48,7 +48,7 @@ def validate_args(args: Any):
     if not getattr(args, 'model_id', None):
         raise ValueError("--model_id is required.")
 
-    if not args.prompts and not args.prompts_file:
+    if not args.prompt and not args.prompts_file:
         raise ValueError("No prompts provided")
     if args.img_width is None or args.img_height is None:
         raise ValueError("Both --img_width and --img_height are required.")
@@ -101,5 +101,5 @@ def validate_args(args: Any):
             raise ValueError("--refiner_guidance is required when using a refiner model")
         if args.refiner_steps is None:
             raise ValueError("--refiner_steps is required when using a refiner model")
-    if not args.prompts and not args.prompts_file:
-        raise ValueError("No prompts provided: specify --prompts or --prompts_file")
+    if not args.prompt and not args.prompts_file:
+        raise ValueError("No prompts provided: specify --prompt or --prompts_file")

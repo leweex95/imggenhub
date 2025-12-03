@@ -17,7 +17,7 @@ class TestValidateArgs:
     def test_image_dimension_validation(self, model_id, img_width, img_height, expected_error, expected_msg):
         args = MagicMock()
         args.model_id = model_id
-        args.prompts = ["test"]
+        args.prompt = ["test"]
         args.prompts_file = None
         args.img_width = img_width
         args.img_height = img_height
@@ -207,8 +207,7 @@ class TestValidateArgs:
         args = MagicMock()
         # Set default valid values
         args.model_id = "leventecsibi/test-model"
-        args.prompt = None
-        args.prompts = ["test prompt"]
+        args.prompt = ["test prompt"]
         args.prompts_file = None
         args.img_width = 512
         args.img_height = 512
@@ -260,7 +259,7 @@ class TestValidateArgs:
 
     def test_no_prompts_raises_error(self):
         """Test that no prompts raises error."""
-        args = self.create_mock_args(prompt=None, prompts=None, prompts_file=None)
+        args = self.create_mock_args(prompt=None, prompts_file=None)
         with pytest.raises(ValueError, match="No prompts provided"):
             validate_args(args)
 

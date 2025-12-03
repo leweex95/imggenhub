@@ -46,7 +46,7 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     if not notebook.is_absolute():
         notebook = kernel_path / notebook.name  # Resolve notebook relative to kernel path
 
-    prompts_list = resolve_prompts(prompts_file, prompt, prompts)
+    prompts_list = resolve_prompts(prompts_file, prompt)
 
     logging.debug(f"Resolved paths:\n prompts_file={prompts_file}\n notebook={notebook}\n kernel_path={kernel_path}\n dest={dest_path}")
 
@@ -171,7 +171,7 @@ def main():
     parser.add_argument("--output_base_dir", type=str, default=None, help="Base directory for output runs (default: current working directory)")
     parser.add_argument("--model_id", type=str, default=None, help="Model ID (HuggingFace repo ID) for all models. For quantized models, use GGUF repo ID.")
     parser.add_argument("--refiner_model_id", type=str, default=None, help="Refiner model ID (HuggingFace repo ID) for SDXL refiner.")
-    parser.add_argument("--prompts", type=str, nargs="+", default=None, help="Prompt(s) for generation. Accepts a single string or a list of strings.")
+    parser.add_argument("--prompt", type=str, nargs="+", default=None, help="Prompt(s) for generation. Accepts a single string or a list of strings.")
     parser.add_argument("--guidance", type=float, required=True, help="Guidance scale (7-12 recommended for photorealism)")
     parser.add_argument("--steps", type=int, required=True, help="Number of inference steps (50-100 for better quality)")
     parser.add_argument("--precision", type=str, required=True, choices=["fp32", "fp16", "bf16", "int8", "int4", "q4", "q5", "q6", "q8"],
@@ -324,7 +324,7 @@ def main():
         gpu=args.gpu,
         model_id=args.model_id,
         refiner_model_id=args.refiner_model_id,
-        prompts=args.prompts,
+        prompt=args.prompt,
         guidance=args.guidance,
         steps=args.steps,
         precision=args.precision,
