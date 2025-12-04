@@ -10,7 +10,7 @@ Full pipeline (all steps chained)
 
 Run the main script to perform all steps automatically:
 
-    poetry run python -m imggenhub.kaggle.main  --model_name "stabilityai/stable-diffusion-xl-base-1.0"--gpu true --dest .
+    poetry run python -m imggenhub.kaggle.main  --model_id "stabilityai/stable-diffusion-xl-base-1.0"--gpu true --dest .
 
 **Note**: don't forget to update the `prompts.json` with the appropriate prompts!
 
@@ -29,9 +29,9 @@ Pre-requisite: Create a JSON file with prompts (one or more) like:
 ]
 ```
 
-Alternatively, you can also pass simpler prompts in command line. The idea is that to allow users to phrase very complex prompts as well - which is more comfortable if prompts are in a separate `prompts.json` file. But especially for PoCs, we might just want to execute one simple prompt directly from the command line. For that, the `--prompt` flag is also available. 
+Alternatively, you can also pass simpler prompts in command line. The idea is that to allow users to phrase very complex prompts as well - which is more comfortable if prompts are in a separate `prompts.json` file. But especially for PoCs, we might just want to execute one simple prompt directly from the command line. For that, the `--prompts` flag is also available. 
 
-Note: if the `--prompt` flag is set, the content of the `prompts.json` file are ignored. 
+Note: if the `--prompts` flag is set, the content of the `prompts.json` file are ignored. 
 
 ### Deploy image generation to the remote kernel 
 
@@ -41,7 +41,7 @@ Push the notebook to the remote Kaggle kernel to start execution:
 
 Or use the deploy script with GPU override to combine steps 1 & 2:
 
-    poetry run python -m deploy --prompts_file prompts.json --gpu true --model_name "stabilityai/stable-diffusion-xl-base-1.0"
+    poetry run python -m deploy --prompts_file prompts.json --gpu true --model_id "stabilityai/stable-diffusion-xl-base-1.0"
 
 ### Poll for completion
 

@@ -2,7 +2,6 @@ import subprocess
 import time
 import re
 import logging
-import shutil
 import sys
 from pathlib import Path
 
@@ -15,65 +14,52 @@ def run(kernel_id=None, poll_interval=None):
     """Poll Kaggle kernel status until complete or error"""
     kernel_id = kernel_id or KERNEL_ID
     poll_interval = poll_interval or POLL_INTERVAL
+    
+    consecutive_errors = 0
+    max_consecutive_errors = 5
 
     while True:
         # Run `kaggle kernels status`
         kaggle_cmd = _get_kaggle_command()
-        result = subprocess.run(
-            [*kaggle_cmd, "kernels", "status", kernel_id],
-            capture_output=True, text=True, encoding='utf-8', timeout=30
-        )
+        try:
+            result = subprocess.run(
+                [*kaggle_cmd, "kernels", "status", kernel_id],
+                capture_output=True, text=True, encoding='utf-8', timeout=30
+            )
+        except subprocess.TimeoutExpired:
+            consecutive_errors += 1
+            logging.warning(f"Status check timed out ({consecutive_errors}/{max_consecutive_errors})")
+            if consecutive_errors >= max_consecutive_errors:
+                return "unknown"
+            time.sleep(poll_interval)
+            continue
+            
         if result.returncode != 0:
-            logging.error("Error fetching status: %s", result.stderr.strip())
-            return "unknown"
+            consecutive_errors += 1
+            logging.warning(f"Error fetching status ({consecutive_errors}/{max_consecutive_errors}): {result.stderr.strip()}")
+            if consecutive_errors >= max_consecutive_errors:
+                return "unknown"
+            time.sleep(poll_interval)
+            continue
+        
+        # Reset error counter on success
+        consecutive_errors = 0
 
         match = re.search(r'has status "(.*)"', result.stdout)
         status = match.group(1) if match else "unknown"
         logging.info("Kernel status: %s", status)
 
         if status.lower() == "unknown":
-            logging.error("Unable to parse kernel status from output")
-            return "unknown"
+            logging.warning("Unable to parse kernel status from output: %s", result.stdout)
+            time.sleep(poll_interval)
+            continue
 
         if status.lower() in ["kernelworkerstatus.complete", "kernelworkerstatus.error"]:
             logging.info("Kernel finished with status: %s", status)
-            
-            # Fetch and display logs
-            fetch_kernel_logs(kernel_id)
-            
             return status.lower()
 
         time.sleep(poll_interval)
 
-
-def fetch_kernel_logs(kernel_id=None):
-    """Fetch and display Kaggle kernel logs"""
-    kernel_id = kernel_id or KERNEL_ID
-    logging.info("="*80)
-    logging.info("Fetching kernel logs from Kaggle...")
-    logging.info("="*80)
-    
-    try:
-        kaggle_cmd = _get_kaggle_command()
-        result = subprocess.run(
-            [*kaggle_cmd, "kernels", "output", kernel_id, "--quiet"],
-            capture_output=True, text=True, encoding='utf-8', timeout=60
-        )
-        
-        if result.returncode == 0:
-            # Look for log file in output
-            log_content = result.stdout
-            if log_content:
-                logging.info("KERNEL LOGS:")
-                logging.info("-"*80)
-                for line in log_content.strip().split('\n'):
-                    logging.info(line)
-                logging.info("-"*80)
-        else:
-            logging.warning(f"Failed to fetch logs: {result.stderr.strip()}")
-            
-    except Exception as e:
-        logging.warning(f"Exception while fetching logs: {e}")
 
 def _get_kaggle_command():
     """
@@ -82,6 +68,8 @@ def _get_kaggle_command():
     Returns:
         list: Command parts to execute kaggle CLI
     """
+    import shutil
+    
     # Check if poetry is available and we're in a poetry project
     def find_pyproject_toml():
         current = Path.cwd()

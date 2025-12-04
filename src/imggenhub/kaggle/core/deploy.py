@@ -34,17 +34,17 @@ def _update_param(source_lines, param_name, value, is_list=False):
     return source_lines
 
 
-def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, two_stage_refiner=False, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, hf_token=None, img_size=None, diffusion_repo_id=None, diffusion_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None):
+def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None):
     """
     Deploy Kaggle notebook kernel, optionally overriding prompts and model.
     Uses the specified notebook; user is responsible for matching notebook to model.
     
-    NOTE: If hf_token is provided locally, you must also add it as a Kaggle Secret
-    named 'HF_TOKEN' via https://www.kaggle.com/settings so the kernel can access it.
-    The notebook reads from os.getenv("HF_TOKEN"), NOT from hardcoded values.
+    The HF_TOKEN is read from the Kaggle dataset 'leventecsibi/imggenhub-hf-token'
+    which is automatically attached to all kernels. Use sync_hf_token() before
+    deployment to ensure the token is up-to-date.
     
     FLUX GGUF model parameters:
-    - diffusion_repo_id/diffusion_filename: Main diffusion model (e.g., city96/FLUX.1-schnell-gguf, flux1-schnell-Q4_0.gguf)
+    - model_id/model_filename: Main diffusion model (e.g., city96/FLUX.1-schnell-gguf, flux1-schnell-Q4_0.gguf)
     - vae_repo_id/vae_filename: VAE model
     - clip_l_repo_id/clip_l_filename: CLIP-L text encoder
     - t5xxl_repo_id/t5xxl_filename: T5-XXL text encoder
@@ -71,23 +71,6 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
         if cell["cell_type"] == "code":
             source = cell["source"] if isinstance(cell["source"], list) else [cell["source"]]
 
-            # Inject HF_TOKEN directly into the notebook if provided, ignoring Kaggle secrets
-            if hf_token:
-                for i, line in enumerate(source):
-                    if 'HF_TOKEN = os.getenv("HF_TOKEN"' in line:
-                        # Forcefully set the token, not relying on environment variable
-                        source[i] = f'HF_TOKEN = "{hf_token}"  # Injected from CLI, ignores Kaggle secret\n'
-                        logging.info("Injected HF_TOKEN directly into notebook (overriding any Kaggle secret)")
-                        break
-            
-            # Force MODEL_SOURCE to "huggingface" when using FLUX GGUF with custom model parameters
-            if is_flux_gguf_notebook and (diffusion_repo_id or diffusion_filename or vae_repo_id or vae_filename or clip_l_repo_id or clip_l_filename or t5xxl_repo_id or t5xxl_filename):
-                for i, line in enumerate(source):
-                    if 'MODEL_SOURCE = os.getenv("MODEL_SOURCE"' in line:
-                        source[i] = 'MODEL_SOURCE = "huggingface"  # Forced by CLI for custom model parameters\n'
-                        logging.info("Forced MODEL_SOURCE to 'huggingface' for custom model parameters")
-                        break
-
             # Update parameters only if provided by user (no silent overrides)
             if prompts_list:
                 source = _update_param(source, "PROMPTS", prompts_list, is_list=True)
@@ -104,12 +87,12 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
             source = _update_param(source, "OUTPUT_DIR", ".")
             if img_size:
                 source = _update_param(source, "IMG_SIZE", img_size)
-            
+
             # FLUX GGUF model configuration parameters
-            if diffusion_repo_id:
-                source = _update_param(source, "DIFFUSION_REPO_ID", diffusion_repo_id)
-            if diffusion_filename:
-                source = _update_param(source, "DIFFUSION_FILENAME", diffusion_filename)
+            if model_id:
+                source = _update_param(source, "MODEL_ID", model_id)
+            if model_filename:
+                source = _update_param(source, "MODEL_FILENAME", model_filename)
             if vae_repo_id:
                 source = _update_param(source, "VAE_REPO_ID", vae_repo_id)
             if vae_filename:
@@ -122,7 +105,7 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
                 source = _update_param(source, "T5XXL_REPO_ID", t5xxl_repo_id)
             if t5xxl_filename:
                 source = _update_param(source, "T5XXL_FILENAME", t5xxl_filename)
-            
+
             # For FLUX bf16 notebooks, do NOT modify model loading
             # They load models directly from HuggingFace Hub using HF_TOKEN
 
@@ -132,8 +115,6 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
                     source = _update_param(source, "REFINER_MODEL_ID", refiner_model_id)
                 if negative_prompt:
                     source = _update_param(source, "NEGATIVE_PROMPT", negative_prompt)
-                if two_stage_refiner:
-                    source = _update_param(source, "TWO_STAGE_REFINER", two_stage_refiner)
                 if refiner_guidance is not None:
                     source = _update_param(source, "REFINER_GUIDANCE", refiner_guidance)
                 if refiner_steps is not None:
@@ -142,22 +123,12 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
                     source = _update_param(source, "REFINER_PRECISION", refiner_precision)
                 if refiner_negative_prompt:
                     source = _update_param(source, "REFINER_NEGATIVE_PROMPT", refiner_negative_prompt)
-            
+
             cell["source"] = source
 
     # Save updated notebook
     with open(nb_path, "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=2)
-
-    # Warn if HF_TOKEN is required but user hasn't set it as Kaggle Secret
-    model_source = os.environ.get("MODEL_SOURCE", "dataset").lower()
-    if hf_token and model_source != "dataset":
-        logging.warning("="*80)
-        logging.warning("HF_TOKEN provided locally but notebook uses os.getenv('HF_TOKEN')")
-        logging.warning("Ensure you've added 'HF_TOKEN' as a Kaggle Secret at:")
-        logging.warning("https://www.kaggle.com/settings")
-        logging.warning("Otherwise the kernel will fail to download models from HuggingFace")
-        logging.warning("="*80)
 
     # Update kernel metadata
     metadata_path = Path(kernel_path) / "kernel-metadata.json"
@@ -197,13 +168,16 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     notebook_path = Path(notebook) if not isinstance(notebook, Path) else notebook
     kernel_meta["code_file"] = notebook_path.name
     
-    # Dynamic dataset_sources: only attach datasets for FLUX GGUF notebooks
-    # This saves GPU startup time and avoids dataset errors for other notebooks
+    # HF token dataset - always required for HuggingFace downloads
+    HF_TOKEN_DATASET = "leventecsibi/imggenhub-hf-token"
+    
+    # Dynamic dataset_sources based on notebook type
     model_source = os.environ.get("MODEL_SOURCE", "dataset").lower()
     if is_flux_gguf_notebook:
         if model_source == "dataset":
-            # Attach FLUX GGUF datasets
+            # Attach FLUX GGUF model datasets + HF token dataset
             kernel_meta["dataset_sources"] = [
+                HF_TOKEN_DATASET,
                 "leventecsibi/flux1-schnell-q4-zip",
                 "leventecsibi/vae-zip",
                 "leventecsibi/clip-l-zip",
@@ -212,17 +186,20 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
             ]
             print("[INFO] Using dataset source for FLUX GGUF model - datasets attached")
         else:
-            # Empty dataset sources when using HuggingFace
-            kernel_meta["dataset_sources"] = []
-            print("="*80)
-            print("[WARNING] Using HuggingFace source for FLUX GGUF model")
-            print("[WARNING] No datasets attached - models will be downloaded from HuggingFace Hub")
-            print("[WARNING] This may increase kernel startup time")
-            print("="*80)
+            # HuggingFace source: only need HF token dataset and sd-build for executable
+            kernel_meta["dataset_sources"] = [
+                HF_TOKEN_DATASET,
+                "leventecsibi/sd-build-zip"
+            ]
+            print("[INFO] Using HuggingFace source - HF token dataset attached")
+    elif is_flux_bf16_notebook:
+        # bf16 notebooks need HF token for model download
+        kernel_meta["dataset_sources"] = [HF_TOKEN_DATASET]
+        print(f"[INFO] Attached HF token dataset for {notebook_path.name}")
     else:
-        # For bf16 and stable diffusion notebooks, clear all dataset sources
-        kernel_meta["dataset_sources"] = []
-        print(f"[INFO] Cleared dataset_sources for {notebook_path.name} - will download from HuggingFace")
+        # Stable diffusion notebooks now read HF token from dataset as well
+        kernel_meta["dataset_sources"] = [HF_TOKEN_DATASET]
+        print(f"[INFO] Attached HF token dataset for {notebook_path.name}")
     logging.info(f"Updated kernel metadata to use notebook: {notebook}")
     
     with open(metadata_path, "w", encoding="utf-8") as f:
@@ -256,6 +233,9 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
 
         if result.stdout:
             logging.info(f"Kaggle push output: {result.stdout}")
+            # Check for errors in stdout (Kaggle CLI sometimes returns 0 even on errors)
+            if "error" in result.stdout.lower() or "maximum" in result.stdout.lower():
+                raise RuntimeError(f"Kaggle push failed: {result.stdout}")
         if result.stderr:
             logging.debug(f"Kaggle push stderr: {result.stderr}")
     except subprocess.CalledProcessError as exc:
