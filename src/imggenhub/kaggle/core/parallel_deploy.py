@@ -178,9 +178,14 @@ def _download_kernel_output(kernel_id: str, dest_path: Path) -> None:
     Args:
         kernel_id: Kernel to download from
         dest_path: Destination directory
+        
+    Raises:
+        RuntimeError: If download fails
     """
     logging.info(f"Downloading output from kernel: {kernel_id}")
-    download.run(dest=dest_path, kernel_id=kernel_id)
+    success = download.run(dest=dest_path, kernel_id=kernel_id)
+    if not success:
+        raise RuntimeError(f"Failed to download images from kernel {kernel_id}")
 
 
 def run_parallel_pipeline(
@@ -268,9 +273,9 @@ def run_parallel_pipeline(
             logging.info(f"  {kid}: {status}")
         logging.info("="*80)
         
-        # Check for errors
+        # Check for errors (only hard errors, not unknown/timeout which might still produce output)
         errors = [kid for kid, status in statuses.items() 
-                  if "error" in status.lower() or status == "unknown" or status == "timeout"]
+                  if "error" in status.lower()]
         if errors:
             logging.error(f"The following kernels failed: {errors}")
             raise RuntimeError(f"Kernel execution failed for: {errors}")
@@ -285,12 +290,30 @@ def run_parallel_pipeline(
         deployment1_download_path.mkdir(parents=True, exist_ok=True)
         deployment2_download_path.mkdir(parents=True, exist_ok=True)
         
-        # Download from both kernels sequentially to avoid API issues
+        # Download from both kernels sequentially, handling failures gracefully
+        download_errors = []
+        
         logging.info(f"Downloading from deployment1 kernel: {DEPLOYMENT1_KERNEL_ID}")
-        _download_kernel_output(DEPLOYMENT1_KERNEL_ID, deployment1_download_path)
+        try:
+            _download_kernel_output(DEPLOYMENT1_KERNEL_ID, deployment1_download_path)
+        except Exception as e:
+            logging.warning(f"Failed to download from deployment1: {e}")
+            download_errors.append(("deployment1", str(e)))
         
         logging.info(f"Downloading from deployment2 kernel: {DEPLOYMENT2_KERNEL_ID}")
-        _download_kernel_output(DEPLOYMENT2_KERNEL_ID, deployment2_download_path)
+        try:
+            _download_kernel_output(DEPLOYMENT2_KERNEL_ID, deployment2_download_path)
+        except Exception as e:
+            logging.warning(f"Failed to download from deployment2: {e}")
+            download_errors.append(("deployment2", str(e)))
+        
+        # If both downloads failed, raise error
+        if len(download_errors) >= 2:
+            logging.error(f"Both kernel downloads failed: {download_errors}")
+            raise RuntimeError(f"All kernel downloads failed: {download_errors}")
+        
+        if len(download_errors) == 1:
+            logging.info(f"One kernel download failed, but continuing with available output: {download_errors}")
         
         # Merge results into final images folder
         final_images_path = dest_path / "images"
@@ -311,6 +334,11 @@ def run_parallel_pipeline(
                     shutil.move(str(image_file), str(target))
                     image_count += 1
                     logging.info(f"  Collected: {target.name}")
+        
+        # Check if we got any images
+        if image_count == 0:
+            logging.error("No images were downloaded from any kernel")
+            raise RuntimeError("Image generation failed: no images downloaded from any kernel")
         
         # Clean up temporary directories
         shutil.rmtree(deployment1_download_path, ignore_errors=True)
