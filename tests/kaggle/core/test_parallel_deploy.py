@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 import tempfile
 import shutil
-from imggenhub.kaggle.core.parallel_deploy import split_prompts, should_use_parallel, _create_worker_kernel_dir, _deploy_single_kernel, _poll_kernel
+from imggenhub.kaggle.core.parallel_deploy import split_prompts, should_use_parallel, _create_deployment2_kernel_dir, _deploy_single_kernel, _poll_kernel
 
 
 class TestSplitPrompts:
@@ -63,8 +63,8 @@ class TestShouldUseParallel:
         assert should_use_parallel(prompts) is False
 
 
-class TestCreateWorkerKernelDir:
-    """Test cases for _create_worker_kernel_dir function."""
+class TestCreateDeployment2KernelDir:
+    """Test cases for _create_deployment2_kernel_dir function."""
 
     @patch('tempfile.mkdtemp')
     @patch('shutil.copy2')
@@ -72,34 +72,34 @@ class TestCreateWorkerKernelDir:
     @patch('builtins.open', new_callable=mock_open)
     @patch('json.load')
     @patch('json.dump')
-    def test_create_worker_kernel_dir(self, mock_json_dump, mock_json_load, mock_file_open, mock_exists, mock_copy, mock_mkdtemp):
-        """Test creating worker kernel directory."""
+    def test_create_deployment2_kernel_dir(self, mock_json_dump, mock_json_load, mock_file_open, mock_exists, mock_copy, mock_mkdtemp):
+        """Test creating deployment2 kernel directory."""
         # Setup mocks
-        mock_mkdtemp.return_value = "/tmp/worker_dir"
+        mock_mkdtemp.return_value = "/tmp/deployment2_dir"
         mock_exists.return_value = True
         mock_json_load.return_value = {
-            "id": "primary-kernel",
-            "title": "Primary Kernel",
+            "id": "deployment1-kernel",
+            "title": "Deployment1 Kernel",
             "code_file": "notebook.ipynb"
         }
 
         # Test
         kernel_path = Path("/path/to/kernel")
         notebook = Path("notebook.ipynb")
-        result = _create_worker_kernel_dir(kernel_path, notebook)
+        result = _create_deployment2_kernel_dir(kernel_path, notebook)
 
         # Assertions
-        assert result == Path("/tmp/worker_dir")
-        mock_mkdtemp.assert_called_once_with(prefix="kaggle_worker_")
+        assert result == Path("/tmp/deployment2_dir")
+        mock_mkdtemp.assert_called_once_with(prefix="kaggle_deployment2_")
         mock_copy.assert_called_once()
         mock_json_load.assert_called_once()
         mock_json_dump.assert_called_once()
 
-        # Check that metadata was modified for worker
+        # Check that metadata was modified for deployment2
         call_args = mock_json_dump.call_args[0]
         modified_metadata = call_args[0]
-        assert modified_metadata["id"] == "leventecsibi/stable-diffusion-batch-generator-worker"
-        assert modified_metadata["title"] == "Stable Diffusion Batch Generator Worker"
+        assert modified_metadata["id"] == "leventecsibi/stable-diffusion-batch-generator-deployment2"
+        assert modified_metadata["title"] == "Stable Diffusion Batch Generator Deployment2"
         assert modified_metadata["code_file"] == "notebook.ipynb"
 
 

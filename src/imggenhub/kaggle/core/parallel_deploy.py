@@ -21,8 +21,8 @@ from imggenhub.kaggle.utils import poll_status
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # Kernel IDs for parallel execution
-PRIMARY_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
-WORKER_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-worker"
+DEPLOYMENT1_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment1"
+DEPLOYMENT2_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment2"
 
 # Threshold for parallel deployment
 PARALLEL_THRESHOLD = 4
@@ -48,43 +48,43 @@ def should_use_parallel(prompts: List[str]) -> bool:
     return len(prompts) > PARALLEL_THRESHOLD
 
 
-def _create_worker_kernel_dir(kernel_path: Path, notebook: Path) -> Path:
+def _create_deployment2_kernel_dir(kernel_path: Path, notebook: Path) -> Path:
     """
-    Create a temporary worker kernel directory with its own metadata.
-    Copies only the needed notebook file and creates worker-specific metadata.
+    Create a temporary deployment2 kernel directory with its own metadata.
+    Copies only the needed notebook file and creates deployment2-specific metadata.
     
     Args:
-        kernel_path: Path to the primary kernel config directory
+        kernel_path: Path to the deployment1 kernel config directory
         notebook: Path to the notebook file to use
         
     Returns:
-        Path to temporary worker kernel directory
+        Path to temporary deployment2 kernel directory
     """
     # Create temp directory that persists until explicitly cleaned up
-    worker_dir = Path(tempfile.mkdtemp(prefix="kaggle_worker_"))
+    deployment2_dir = Path(tempfile.mkdtemp(prefix="kaggle_deployment2_"))
     
     # Copy the specific notebook file
     notebook_name = notebook.name
     source_notebook = kernel_path / notebook_name
     if not source_notebook.exists():
         source_notebook = notebook  # Use the notebook path directly
-    shutil.copy2(source_notebook, worker_dir / notebook_name)
+    shutil.copy2(source_notebook, deployment2_dir / notebook_name)
     
-    # Create worker-specific metadata
-    primary_metadata_path = kernel_path / "kernel-metadata.json"
-    with open(primary_metadata_path, "r", encoding="utf-8") as f:
+    # Create deployment2-specific metadata
+    deployment1_metadata_path = kernel_path / "kernel-metadata.json"
+    with open(deployment1_metadata_path, "r", encoding="utf-8") as f:
         metadata = json.load(f)
     
-    # Modify for worker kernel
-    metadata["id"] = WORKER_KERNEL_ID
-    metadata["title"] = "Stable Diffusion Batch Generator Worker"
+    # Modify for deployment2 kernel
+    metadata["id"] = DEPLOYMENT2_KERNEL_ID
+    metadata["title"] = "Stable Diffusion Batch Generator Deployment2"
     metadata["code_file"] = notebook_name
     
-    worker_metadata_path = worker_dir / "kernel-metadata.json"
-    with open(worker_metadata_path, "w", encoding="utf-8") as f:
+    deployment2_metadata_path = deployment2_dir / "kernel-metadata.json"
+    with open(deployment2_metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
     
-    return worker_dir
+    return deployment2_dir
 
 
 def _deploy_single_kernel(
@@ -205,11 +205,11 @@ def run_parallel_pipeline(
     """
     # Split prompts
     first_batch, second_batch = split_prompts(prompts_list)
-    logging.info(f"Splitting {len(prompts_list)} prompts: {len(first_batch)} (primary) + {len(second_batch)} (worker)")
+    logging.info(f"Splitting {len(prompts_list)} prompts: {len(first_batch)} (deployment1) + {len(second_batch)} (deployment2)")
     
-    # Create temporary worker kernel directory
-    worker_kernel_path = _create_worker_kernel_dir(kernel_path, notebook)
-    logging.info(f"Created worker kernel directory: {worker_kernel_path}")
+    # Create temporary deployment2 kernel directory
+    deployment2_kernel_path = _create_deployment2_kernel_dir(kernel_path, notebook)
+    logging.info(f"Created deployment2 kernel directory: {deployment2_kernel_path}")
     
     try:
         # Deploy both kernels
@@ -217,26 +217,26 @@ def run_parallel_pipeline(
         logging.info("PARALLEL DEPLOYMENT: Deploying to 2 Kaggle kernels")
         logging.info("="*80)
         
-        # Deploy primary kernel first
+        # Deploy deployment1 kernel first
         _deploy_single_kernel(
             prompts_list=first_batch,
             notebook=notebook,
             kernel_path=kernel_path,
-            kernel_id=PRIMARY_KERNEL_ID,
+            kernel_id=DEPLOYMENT1_KERNEL_ID,
             deploy_kwargs=deploy_kwargs
         )
         
-        # Wait before deploying worker to avoid API conflicts
-        logging.info("Waiting 15 seconds before deploying worker kernel...")
+        # Wait before deploying deployment2 to avoid API conflicts
+        logging.info("Waiting 15 seconds before deploying deployment2 kernel...")
         time.sleep(15)
         
-        # Deploy worker kernel
-        worker_notebook = worker_kernel_path / notebook.name
+        # Deploy deployment2 kernel
+        deployment2_notebook = deployment2_kernel_path / notebook.name
         _deploy_single_kernel(
             prompts_list=second_batch,
-            notebook=worker_notebook,
-            kernel_path=worker_kernel_path,
-            kernel_id=WORKER_KERNEL_ID,
+            notebook=deployment2_notebook,
+            kernel_path=deployment2_kernel_path,
+            kernel_id=DEPLOYMENT2_KERNEL_ID,
             deploy_kwargs=deploy_kwargs
         )
         
@@ -248,8 +248,8 @@ def run_parallel_pipeline(
         statuses = {}
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
-                executor.submit(_poll_kernel, PRIMARY_KERNEL_ID): PRIMARY_KERNEL_ID,
-                executor.submit(_poll_kernel, WORKER_KERNEL_ID): WORKER_KERNEL_ID
+                executor.submit(_poll_kernel, DEPLOYMENT1_KERNEL_ID): DEPLOYMENT1_KERNEL_ID,
+                executor.submit(_poll_kernel, DEPLOYMENT2_KERNEL_ID): DEPLOYMENT2_KERNEL_ID
             }
             
             for future in as_completed(futures):
@@ -280,17 +280,17 @@ def run_parallel_pipeline(
         logging.info("="*80)
         
         # Create temporary directories for downloads
-        primary_download_path = dest_path / "_primary_temp"
-        worker_download_path = dest_path / "_worker_temp"
-        primary_download_path.mkdir(parents=True, exist_ok=True)
-        worker_download_path.mkdir(parents=True, exist_ok=True)
+        deployment1_download_path = dest_path / "_deployment1_temp"
+        deployment2_download_path = dest_path / "_deployment2_temp"
+        deployment1_download_path.mkdir(parents=True, exist_ok=True)
+        deployment2_download_path.mkdir(parents=True, exist_ok=True)
         
         # Download from both kernels sequentially to avoid API issues
-        logging.info(f"Downloading from primary kernel: {PRIMARY_KERNEL_ID}")
-        _download_kernel_output(PRIMARY_KERNEL_ID, primary_download_path)
+        logging.info(f"Downloading from deployment1 kernel: {DEPLOYMENT1_KERNEL_ID}")
+        _download_kernel_output(DEPLOYMENT1_KERNEL_ID, deployment1_download_path)
         
-        logging.info(f"Downloading from worker kernel: {WORKER_KERNEL_ID}")
-        _download_kernel_output(WORKER_KERNEL_ID, worker_download_path)
+        logging.info(f"Downloading from deployment2 kernel: {DEPLOYMENT2_KERNEL_ID}")
+        _download_kernel_output(DEPLOYMENT2_KERNEL_ID, deployment2_download_path)
         
         # Merge results into final images folder
         final_images_path = dest_path / "images"
@@ -299,7 +299,7 @@ def run_parallel_pipeline(
         image_extensions = (".png", ".jpg", ".jpeg")
         image_count = 0
         
-        for temp_path in [primary_download_path, worker_download_path]:
+        for temp_path in [deployment1_download_path, deployment2_download_path]:
             for image_file in temp_path.rglob("*"):
                 if image_file.is_file() and image_file.suffix.lower() in image_extensions:
                     target = final_images_path / image_file.name
@@ -313,8 +313,8 @@ def run_parallel_pipeline(
                     logging.info(f"  Collected: {target.name}")
         
         # Clean up temporary directories
-        shutil.rmtree(primary_download_path, ignore_errors=True)
-        shutil.rmtree(worker_download_path, ignore_errors=True)
+        shutil.rmtree(deployment1_download_path, ignore_errors=True)
+        shutil.rmtree(deployment2_download_path, ignore_errors=True)
         
         logging.info("="*80)
         logging.info(f"PARALLEL PIPELINE COMPLETE!")
@@ -323,7 +323,7 @@ def run_parallel_pipeline(
         logging.info("="*80)
         
     finally:
-        # Always clean up worker kernel directory
-        if worker_kernel_path.exists():
-            shutil.rmtree(worker_kernel_path, ignore_errors=True)
-            logging.info(f"Cleaned up worker directory: {worker_kernel_path}")
+        # Always clean up deployment2 kernel directory
+        if deployment2_kernel_path.exists():
+            shutil.rmtree(deployment2_kernel_path, ignore_errors=True)
+            logging.info(f"Cleaned up deployment2 directory: {deployment2_kernel_path}")
