@@ -4,12 +4,12 @@ Filesystem utilities for directory and file management.
 from pathlib import Path
 
 
-def ensure_output_directory(base_dir: str = "output") -> Path:
+def ensure_output_directory(base_dir: str = "outputs") -> Path:
     """
     Ensure the base output directory exists.
 
     Args:
-        base_dir: Name of the base output directory (default: "output")
+        base_dir: Name of the base output directory (default: "outputs")
 
     Returns:
         Path: Path to the base output directory
@@ -19,7 +19,7 @@ def ensure_output_directory(base_dir: str = "output") -> Path:
     return output_base
 
 
-def create_run_directory(base_dir: str = "output", run_name: str = "output_images") -> Path:
+def create_run_directory(base_dir: str = "outputs", run_name: str = "output_images") -> Path:
     """
     Create a run-specific output directory.
 
