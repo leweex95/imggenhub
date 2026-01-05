@@ -183,7 +183,7 @@ def main():
     parser.add_argument("--output_base_dir", type=str, default=None, help="Base directory for output runs (default: current working directory)")
     parser.add_argument("--model_id", type=str, default=None, help="Model ID (HuggingFace repo ID) for all models. For quantized models, use GGUF repo ID.")
     parser.add_argument("--refiner_model_id", type=str, default=None, help="Refiner model ID (HuggingFace repo ID) for SDXL refiner.")
-    parser.add_argument("--prompt", type=str, nargs="+", default=None, help="Prompt(s) for generation. Accepts a single string or a list of strings.")
+    parser.add_argument("--prompt", action='append', default=None, help="Prompt(s) for generation. Can be used multiple times for multiple prompts. For many prompts, use --prompts_file.")
     parser.add_argument("--guidance", type=float, required=True, help="Guidance scale (7-12 recommended for photorealism)")
     parser.add_argument("--steps", type=int, required=True, help="Number of inference steps (50-100 for better quality)")
     parser.add_argument("--precision", type=str, required=True, choices=["fp32", "fp16", "bf16", "int8", "int4", "q4", "q5", "q6", "q8"],

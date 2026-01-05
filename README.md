@@ -41,7 +41,23 @@ _Planned in Dec 2025 / Jan 2026._
 
 ```bash
 poetry run imggenhub \
-  --prompts "photorealistic indoor restaurant scene" \
+  --prompt "photorealistic indoor restaurant scene" \
+  --model_id "black-forest-labs/FLUX.1-schnell" \
+  --steps 4 \
+  --guidance 0.75 \
+  --img_width 1024 \
+  --img_height 1024 \
+  --precision bf16 \
+  --gpu
+```
+
+### Multiple prompts via command line
+
+```bash
+poetry run imggenhub \
+  --prompt "A serene mountain landscape at sunset" \
+  --prompt "A bustling city street in the rain" \
+  --prompt "An abstract geometric pattern" \
   --model_id "black-forest-labs/FLUX.1-schnell" \
   --steps 4 \
   --guidance 0.75 \
@@ -55,7 +71,7 @@ poetry run imggenhub \
 
 ```bash
 poetry run imggenhub \
-  --prompts "photorealistic indoor restaurant scene" \
+  --prompt "photorealistic indoor restaurant scene" \
   --model_id "city96/FLUX.1-schnell-gguf" \
   --model_filename "flux1-schnell-Q4_0.gguf" \
   --steps 4 \
@@ -70,7 +86,7 @@ poetry run imggenhub \
 
 ```bash
 poetry run imggenhub \
-  --prompts "photorealistic indoor restaurant scene" \
+  --prompt "photorealistic indoor restaurant scene" \
   --model_id stabilityai/stable-diffusion-xl-base-1.0 \
   --refiner_model_id stabilityai/stable-diffusion-xl-refiner-1.0 \
   --steps 30 \
@@ -85,7 +101,7 @@ poetry run imggenhub \
 ### **Supported flags**
 
 #### **General flags** (all models)
-- `--prompts`: Single prompt string or list of strings
+- `--prompt`: Single prompt or multiple prompts (use flag multiple times)
 - `--prompts_file`: JSON file with multiple prompts  
 - `--gpu`: Enable GPU acceleration (required for FLUX.1 models)
 - `--steps`: Inference steps (50-100 for Stable Diffusion models, ~4 for FLUX)
