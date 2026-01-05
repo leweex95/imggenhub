@@ -4,6 +4,7 @@ import subprocess
 import logging
 from pathlib import Path
 from imggenhub.kaggle.core import deploy, download
+from imggenhub.kaggle.core import download
 from imggenhub.kaggle.core.parallel_deploy import run_parallel_pipeline, should_use_parallel
 from imggenhub.kaggle.secrets import sync_hf_token
 from imggenhub.kaggle.utils import poll_status
@@ -11,22 +12,14 @@ from imggenhub.kaggle.utils.prompts import resolve_prompts
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
 from imggenhub.kaggle.utils.arg_validator import validate_args
-from imggenhub.kaggle.utils.config_loader import load_kaggle_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None):
+def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None):
     """Run Kaggle image generation pipeline: sync HF token -> deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
     cwd = Path(__file__).parent
-
-    # Load Kaggle config
-    config = load_kaggle_config()
-    if wait_timeout is None:
-        wait_timeout = config.get("deployment_timeout_minutes", 30)
-    
-    retry_interval = config.get("retry_interval_seconds", 60)
 
     # Sync HF token to Kaggle dataset before deployment
     logging.info("Syncing HF token to Kaggle dataset...")
@@ -93,9 +86,6 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             prompts_list=prompts_list,
             notebook=notebook,
             kernel_path=kernel_path,
-            wait_timeout=wait_timeout,
-            retry_interval=retry_interval,
-            polling_interval=config.get("polling_interval_seconds", 60),
             **deploy_kwargs
         )
         
@@ -131,14 +121,12 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         clip_l_filename=clip_l_filename,
         t5xxl_repo_id=t5xxl_repo_id,
         t5xxl_filename=t5xxl_filename,
-        wait_timeout=wait_timeout,
-        retry_interval=retry_interval
     )
     logging.debug("Deploy step completed")
 
     # Step 2: Poll status
     logging.info("Polling kernel status...")
-    status = poll_status.run(poll_interval=config.get("polling_interval_seconds", 60))
+    status = poll_status.run()
     logging.debug("Poll status completed")
 
     if status == "kernelworkerstatus.error":
@@ -196,7 +184,6 @@ def main():
     parser.add_argument("--refiner_negative_prompt", type=str, default=None, help="STABLE DIFFUSION ONLY: Custom negative prompt for refiner (defaults to same as --negative_prompt). Ignored for Flux models.")
     parser.add_argument("--img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
-    parser.add_argument("--wait_timeout", type=int, default=None, help="Maximum wait time in minutes for GPU availability (overrides YAML config)")
     
     # FLUX GGUF model configuration (quantized models only)
     parser.add_argument("--model_filename", type=str, default=None, help="Model filename for quantized GGUF models (e.g., flux1-schnell-Q4_0.gguf)")
@@ -354,7 +341,6 @@ def main():
         clip_l_filename=args.clip_l_filename,
         t5xxl_repo_id=args.t5xxl_repo_id,
         t5xxl_filename=args.t5xxl_filename,
-        wait_timeout=args.wait_timeout,
     )
 
 
