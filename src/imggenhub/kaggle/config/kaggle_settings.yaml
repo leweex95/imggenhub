@@ -1,5 +1,0 @@
-# Kaggle Deployment Settings
-gpu_limit: 2
-deployment_timeout_minutes: 30
-polling_interval_seconds: 60
-retry_interval_seconds: 60
