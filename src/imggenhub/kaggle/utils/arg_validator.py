@@ -68,6 +68,11 @@ def validate_args(args: Any):
         raise ValueError("--guidance is required")
     if args.precision is None:
         raise ValueError("--precision is required")
+    
+    if hasattr(args, 'wait_timeout') and args.wait_timeout is not None:
+        if args.wait_timeout < 0:
+            raise ValueError("--wait_timeout must be a non-negative integer.")
+
     use_refiner = (getattr(args, 'refiner_model_id', None) is not None)
     if args.precision != "auto":
         if is_kaggle_model(args.model_id):
