@@ -253,17 +253,18 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
             )
 
             if result.stdout:
-                # Check for retryable errors first
+                # Check for retryable resource limit errors
                 stdout_lower = result.stdout.lower()
-                is_retryable_error = any(msg in stdout_lower for msg in ["maximum", "session", "limit", "gpu", "409", "conflict"])
+                contains_error = "error" in stdout_lower
+                is_resource_limit = any(msg in stdout_lower for msg in ["maximum", "session", "limit", "gpu", "batch", "409", "conflict"])
                 
-                if is_retryable_error:
-                    # Don't log misleading "error" messages - these are expected and we'll retry
-                    logging.debug(f"Kaggle push indicated resource limit: {result.stdout.strip()}")
+                if contains_error and is_resource_limit:
+                    # This is a resource limit - don't show misleading error, just raise for retry
+                    logging.debug(f"Kaggle resource limit detected: {result.stdout.strip()}")
                     raise RuntimeError(f"Kaggle resource limit: {result.stdout}")
-                elif "error" in stdout_lower:
+                elif contains_error:
                     # Log actual errors
-                    logging.info(f"Kaggle push output: {result.stdout}")
+                    logging.info(f"Kaggle push failed: {result.stdout}")
                     raise RuntimeError(f"Kaggle push failed: {result.stdout}")
                 else:
                     # Success or informational output
