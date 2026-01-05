@@ -293,18 +293,9 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
                 
                 remaining = timeout_seconds - elapsed
                 
-                # Sophisticated warning display
-                print("\n" + "="*70)
-                print("KAGGLE GPU RESOURCE LIMIT REACHED")
-                print("="*70)
-                print("   No GPU slots available on Kaggle at this time.")
-                print(f"   Next retry in {retry_interval} seconds...")
-                print()
-                print("   Progress:")
-                print(f"   • Elapsed:  {int(elapsed/60)}m")
-                print(f"   • Timeout:  {wait_timeout}m") 
-                print(f"   • Remaining: {int(remaining/60)}m")
-                print("="*70 + "\n")
+                # Log resource limit warning with consistent formatting
+                logging.info(f"Kaggle GPU resource limit reached - no slots available")
+                logging.info(f"   Next retry in {retry_interval}s | Elapsed: {int(elapsed/60)}m | Timeout: {wait_timeout}m | Remaining: {int(remaining/60)}m")
                 
                 time.sleep(retry_interval)
                 continue
