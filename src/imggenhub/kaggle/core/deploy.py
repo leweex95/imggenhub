@@ -253,10 +253,22 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
             )
 
             if result.stdout:
-                logging.info(f"Kaggle push output: {result.stdout}")
-                # Check for errors in stdout (Kaggle CLI sometimes returns 0 even on errors)
-                if "error" in result.stdout.lower() or "maximum" in result.stdout.lower():
+                # Check for retryable errors first
+                stdout_lower = result.stdout.lower()
+                is_retryable_error = any(msg in stdout_lower for msg in ["maximum", "session", "limit", "gpu", "409", "conflict"])
+                
+                if is_retryable_error:
+                    # Don't log misleading "error" messages - these are expected and we'll retry
+                    logging.debug(f"Kaggle push indicated resource limit: {result.stdout.strip()}")
+                    raise RuntimeError(f"Kaggle resource limit: {result.stdout}")
+                elif "error" in stdout_lower:
+                    # Log actual errors
+                    logging.info(f"Kaggle push output: {result.stdout}")
                     raise RuntimeError(f"Kaggle push failed: {result.stdout}")
+                else:
+                    # Success or informational output
+                    logging.info(f"Kaggle push output: {result.stdout}")
+                    
             if result.stderr:
                 logging.debug(f"Kaggle push stderr: {result.stderr}")
             
@@ -280,12 +292,19 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
                     raise RuntimeError(f"Kaggle GPU deployment timeout: {error_msg}")
                 
                 remaining = timeout_seconds - elapsed
-                print("\n" + "!"*80)
-                print("WARNING: KAGGLE GPU DEPLOYMENT LIMIT REACHED!")
-                print("!"*80)
-                print(f"No GPU slots available. Waiting {retry_interval}s before retry...")
-                print(f"Elapsed: {int(elapsed/60)}m | Timeout: {wait_timeout}m | Remaining: {int(remaining/60)}m")
-                print("!"*80 + "\n")
+                
+                # Sophisticated warning display
+                print("\n" + "="*70)
+                print("KAGGLE GPU RESOURCE LIMIT REACHED")
+                print("="*70)
+                print("   No GPU slots available on Kaggle at this time.")
+                print(f"   Next retry in {retry_interval} seconds...")
+                print()
+                print("   Progress:")
+                print(f"   • Elapsed:  {int(elapsed/60)}m")
+                print(f"   • Timeout:  {wait_timeout}m") 
+                print(f"   • Remaining: {int(remaining/60)}m")
+                print("="*70 + "\n")
                 
                 time.sleep(retry_interval)
                 continue
