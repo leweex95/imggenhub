@@ -4,7 +4,6 @@ import subprocess
 import logging
 from pathlib import Path
 from imggenhub.kaggle.core import deploy, download
-from imggenhub.kaggle.core import download
 from imggenhub.kaggle.core.parallel_deploy import run_parallel_pipeline, should_use_parallel
 from imggenhub.kaggle.secrets import sync_hf_token
 from imggenhub.kaggle.utils import poll_status
@@ -12,14 +11,22 @@ from imggenhub.kaggle.utils.prompts import resolve_prompts
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
 from imggenhub.kaggle.utils.arg_validator import validate_args
+from imggenhub.kaggle.utils.config_loader import load_kaggle_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None):
+def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None):
     """Run Kaggle image generation pipeline: sync HF token -> deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
     cwd = Path(__file__).parent
+
+    # Load Kaggle config
+    config = load_kaggle_config()
+    if wait_timeout is None:
+        wait_timeout = config.get("deployment_timeout_minutes", 30)
+    
+    retry_interval = config.get("retry_interval_seconds", 60)
 
     # Sync HF token to Kaggle dataset before deployment
     logging.info("Syncing HF token to Kaggle dataset...")
@@ -86,6 +93,9 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             prompts_list=prompts_list,
             notebook=notebook,
             kernel_path=kernel_path,
+            wait_timeout=wait_timeout,
+            retry_interval=retry_interval,
+            polling_interval=config.get("polling_interval_seconds", 60),
             **deploy_kwargs
         )
         
@@ -121,12 +131,14 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         clip_l_filename=clip_l_filename,
         t5xxl_repo_id=t5xxl_repo_id,
         t5xxl_filename=t5xxl_filename,
+        wait_timeout=wait_timeout,
+        retry_interval=retry_interval
     )
     logging.debug("Deploy step completed")
 
     # Step 2: Poll status
     logging.info("Polling kernel status...")
-    status = poll_status.run()
+    status = poll_status.run(poll_interval=config.get("polling_interval_seconds", 60))
     logging.debug("Poll status completed")
 
     if status == "kernelworkerstatus.error":
@@ -142,6 +154,18 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     
     if not success:
         logging.warning("Selective download did not complete successfully")
+
+    # Validate image count for sequential deployment
+    if not should_use_parallel(prompts_list):
+        image_extensions = {".png", ".jpg", ".jpeg"}
+        actual_images = len([f for f in dest_path.rglob("*") if f.is_file() and f.suffix.lower() in image_extensions])
+        expected_images = len(prompts_list)
+        if actual_images != expected_images:
+            logging.error(f"Incomplete image generation: expected {expected_images} images but got {actual_images}")
+            raise RuntimeError(
+                f"Image generation incomplete: expected {expected_images} images "
+                f"but only got {actual_images}. Some prompts failed to generate images."
+            )
 
     logging.info(f"Pipeline completed! Output saved to: {dest_path}")
     logging.info("Check remaining GPU quota: https://www.kaggle.com/settings#quotas")
@@ -171,7 +195,7 @@ def main():
     parser.add_argument("--output_base_dir", type=str, default=None, help="Base directory for output runs (default: current working directory)")
     parser.add_argument("--model_id", type=str, default=None, help="Model ID (HuggingFace repo ID) for all models. For quantized models, use GGUF repo ID.")
     parser.add_argument("--refiner_model_id", type=str, default=None, help="Refiner model ID (HuggingFace repo ID) for SDXL refiner.")
-    parser.add_argument("--prompt", type=str, nargs="+", default=None, help="Prompt(s) for generation. Accepts a single string or a list of strings.")
+    parser.add_argument("--prompt", action='append', default=None, help="Prompt(s) for generation. Can be used multiple times for multiple prompts. For many prompts, use --prompts_file.")
     parser.add_argument("--guidance", type=float, required=True, help="Guidance scale (7-12 recommended for photorealism)")
     parser.add_argument("--steps", type=int, required=True, help="Number of inference steps (50-100 for better quality)")
     parser.add_argument("--precision", type=str, required=True, choices=["fp32", "fp16", "bf16", "int8", "int4", "q4", "q5", "q6", "q8"],
@@ -184,6 +208,7 @@ def main():
     parser.add_argument("--refiner_negative_prompt", type=str, default=None, help="STABLE DIFFUSION ONLY: Custom negative prompt for refiner (defaults to same as --negative_prompt). Ignored for Flux models.")
     parser.add_argument("--img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
+    parser.add_argument("--wait_timeout", type=int, default=None, help="Maximum wait time in minutes for GPU availability (overrides YAML config)")
     
     # FLUX GGUF model configuration (quantized models only)
     parser.add_argument("--model_filename", type=str, default=None, help="Model filename for quantized GGUF models (e.g., flux1-schnell-Q4_0.gguf)")
@@ -341,6 +366,7 @@ def main():
         clip_l_filename=args.clip_l_filename,
         t5xxl_repo_id=args.t5xxl_repo_id,
         t5xxl_filename=args.t5xxl_filename,
+        wait_timeout=args.wait_timeout,
     )
 
 

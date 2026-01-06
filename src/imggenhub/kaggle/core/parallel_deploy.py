@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Tuple
 
 from imggenhub.kaggle.core import deploy, download
 from imggenhub.kaggle.utils import poll_status
+from imggenhub.kaggle.utils.config_loader import load_kaggle_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -92,8 +93,7 @@ def _deploy_single_kernel(
     notebook: Path,
     kernel_path: Path,
     kernel_id: str,
-    deploy_kwargs: Dict[str, Any],
-    max_retries: int = 5
+    deploy_kwargs: Dict[str, Any]
 ) -> str:
     """
     Deploy a single kernel with given prompts.
@@ -104,68 +104,51 @@ def _deploy_single_kernel(
         kernel_path: Kernel config directory
         kernel_id: Kernel identifier
         deploy_kwargs: Additional kwargs for deploy.run
-        max_retries: Maximum retry attempts for transient errors
         
     Returns:
         Kernel ID that was deployed
     """
     logging.info(f"Deploying {len(prompts_list)} prompts to kernel: {kernel_id}")
-    logging.info(f"Prompts: {prompts_list}")
     
-    # Deploy using standard deploy module with retry logic
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            deploy.run(
-                prompts_list=prompts_list,
-                notebook=notebook,
-                kernel_path=kernel_path,
-                **deploy_kwargs
-            )
-            logging.info(f"Successfully deployed kernel: {kernel_id}")
-            return kernel_id
-        except Exception as e:
-            last_error = e
-            error_str = str(e).lower()
-            # Check for retryable errors (409 Conflict, rate limits, GPU session limits)
-            if "409" in error_str or "conflict" in error_str or "rate" in error_str or "maximum" in error_str or "session" in error_str:
-                wait_time = 30 * (attempt + 1)  # 30s, 60s, 90s, 120s, 150s
-                logging.warning(f"Deployment limit/conflict (attempt {attempt + 1}/{max_retries}). Retrying in {wait_time}s...")
-                logging.warning(f"Error was: {e}")
-                time.sleep(wait_time)
-            else:
-                # Non-retryable error, raise immediately
-                logging.error(f"Non-retryable deployment error: {e}")
-                raise
-    
-    # All retries exhausted
-    logging.error(f"All {max_retries} deployment attempts failed for {kernel_id}")
-    raise last_error
+    # Deploy using standard deploy module (which now handles its own retry/wait logic)
+    deploy.run(
+        prompts_list=prompts_list,
+        notebook=notebook,
+        kernel_path=kernel_path,
+        **deploy_kwargs
+    )
+    logging.info(f"Successfully deployed kernel: {kernel_id}")
+    return kernel_id
 
 
-def _poll_kernel(kernel_id: str, max_wait: int = 1800) -> str:
+def _poll_kernel(kernel_id: str, max_wait: int = 1800, poll_interval: int = None) -> str:
     """
     Poll a single kernel until completion with timeout.
     
     Args:
         kernel_id: Kernel to poll
         max_wait: Maximum wait time in seconds (default 30 min)
+        poll_interval: Interval in seconds between status polls
         
     Returns:
         Final status
     """
+    if poll_interval is None:
+        config = load_kaggle_config()
+        poll_interval = config.get("polling_interval_seconds", 60)
+    
     logging.info(f"Starting poll for kernel: {kernel_id}")
     start_time = time.time()
     
     while (time.time() - start_time) < max_wait:
         try:
-            status = poll_status.run(kernel_id=kernel_id, poll_interval=15)
+            status = poll_status.run(kernel_id=kernel_id, poll_interval=poll_interval)
             logging.info(f"Kernel {kernel_id} finished with status: {status}")
             return status
         except Exception as e:
             # If polling fails, wait and retry
             logging.warning(f"Poll error for {kernel_id}: {e}. Retrying...")
-            time.sleep(15)
+            time.sleep(poll_interval)
     
     logging.error(f"Kernel {kernel_id} timed out after {max_wait}s")
     return "timeout"
@@ -193,6 +176,9 @@ def run_parallel_pipeline(
     prompts_list: List[str],
     notebook: Path,
     kernel_path: Path,
+    wait_timeout: int = None,
+    retry_interval: int = None,
+    polling_interval: int = None,
     **deploy_kwargs
 ) -> None:
     """
@@ -206,8 +192,21 @@ def run_parallel_pipeline(
         prompts_list: Full list of prompts
         notebook: Notebook to use
         kernel_path: Kernel config directory
+        wait_timeout: Maximum wait time in minutes for GPU availability
+        retry_interval: Interval in seconds between retries
+        polling_interval: Interval in seconds between status polls
         **deploy_kwargs: Additional arguments for deploy.run
     """
+    # Load config for defaults if not provided
+    if wait_timeout is None or retry_interval is None or polling_interval is None:
+        config = load_kaggle_config()
+        if wait_timeout is None:
+            wait_timeout = config.get("deployment_timeout_minutes", 30)
+        if retry_interval is None:
+            retry_interval = config.get("retry_interval_seconds", 60)
+        if polling_interval is None:
+            polling_interval = config.get("polling_interval_seconds", 60)
+
     # Split prompts
     first_batch, second_batch = split_prompts(prompts_list)
     logging.info(f"Splitting {len(prompts_list)} prompts: {len(first_batch)} (deployment1) + {len(second_batch)} (deployment2)")
@@ -228,7 +227,7 @@ def run_parallel_pipeline(
             notebook=notebook,
             kernel_path=kernel_path,
             kernel_id=DEPLOYMENT1_KERNEL_ID,
-            deploy_kwargs=deploy_kwargs
+            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval}
         )
         
         # Wait before deploying deployment2 to avoid API conflicts
@@ -242,7 +241,7 @@ def run_parallel_pipeline(
             notebook=deployment2_notebook,
             kernel_path=deployment2_kernel_path,
             kernel_id=DEPLOYMENT2_KERNEL_ID,
-            deploy_kwargs=deploy_kwargs
+            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval}
         )
         
         logging.info("="*80)
@@ -253,8 +252,8 @@ def run_parallel_pipeline(
         statuses = {}
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
-                executor.submit(_poll_kernel, DEPLOYMENT1_KERNEL_ID): DEPLOYMENT1_KERNEL_ID,
-                executor.submit(_poll_kernel, DEPLOYMENT2_KERNEL_ID): DEPLOYMENT2_KERNEL_ID
+                executor.submit(_poll_kernel, DEPLOYMENT1_KERNEL_ID, poll_interval=polling_interval): DEPLOYMENT1_KERNEL_ID,
+                executor.submit(_poll_kernel, DEPLOYMENT2_KERNEL_ID, poll_interval=polling_interval): DEPLOYMENT2_KERNEL_ID
             }
             
             for future in as_completed(futures):
@@ -335,10 +334,17 @@ def run_parallel_pipeline(
                     image_count += 1
                     logging.info(f"  Collected: {target.name}")
         
-        # Check if we got any images
+        # Check if we got the expected number of images
+        expected_images = len(prompts_list)
         if image_count == 0:
             logging.error("No images were downloaded from any kernel")
             raise RuntimeError("Image generation failed: no images downloaded from any kernel")
+        elif image_count != expected_images:
+            logging.error(f"Incomplete image generation: expected {expected_images} images but got {image_count}")
+            raise RuntimeError(
+                f"Image generation incomplete: expected {expected_images} images "
+                f"but only got {image_count}. Some prompts failed to generate images."
+            )
         
         # Clean up temporary directories
         shutil.rmtree(deployment1_download_path, ignore_errors=True)

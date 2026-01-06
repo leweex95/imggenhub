@@ -17,7 +17,7 @@ class TestValidateArgs:
     def test_image_dimension_validation(self, model_id, img_width, img_height, expected_error, expected_msg):
         args = MagicMock()
         args.model_id = model_id
-        args.prompt = ["test"]
+        args.prompt = "test"
         args.prompts_file = None
         args.img_width = img_width
         args.img_height = img_height
@@ -221,6 +221,7 @@ class TestValidateArgs:
         args.refiner_precision = None
         args.refiner_guidance = None
         args.refiner_steps = None
+        args.wait_timeout = None
 
         # Override with provided kwargs
         for key, value in kwargs.items():

@@ -4,16 +4,19 @@ import re
 import logging
 import sys
 from pathlib import Path
+from imggenhub.kaggle.utils.config_loader import load_kaggle_config
 
 KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
-POLL_INTERVAL = 10  # seconds
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def run(kernel_id=None, poll_interval=None):
     """Poll Kaggle kernel status until complete or error"""
     kernel_id = kernel_id or KERNEL_ID
-    poll_interval = poll_interval or POLL_INTERVAL
+    
+    if poll_interval is None:
+        config = load_kaggle_config()
+        poll_interval = config.get("polling_interval_seconds", 60)
     
     consecutive_errors = 0
     max_consecutive_errors = 5
