@@ -155,6 +155,18 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     if not success:
         logging.warning("Selective download did not complete successfully")
 
+    # Validate image count for sequential deployment
+    if not should_use_parallel(prompts_list):
+        image_extensions = {".png", ".jpg", ".jpeg"}
+        actual_images = len([f for f in dest_path.rglob("*") if f.is_file() and f.suffix.lower() in image_extensions])
+        expected_images = len(prompts_list)
+        if actual_images != expected_images:
+            logging.error(f"Incomplete image generation: expected {expected_images} images but got {actual_images}")
+            raise RuntimeError(
+                f"Image generation incomplete: expected {expected_images} images "
+                f"but only got {actual_images}. Some prompts failed to generate images."
+            )
+
     logging.info(f"Pipeline completed! Output saved to: {dest_path}")
     logging.info("Check remaining GPU quota: https://www.kaggle.com/settings#quotas")
 

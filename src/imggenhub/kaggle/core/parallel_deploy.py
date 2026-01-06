@@ -334,10 +334,17 @@ def run_parallel_pipeline(
                     image_count += 1
                     logging.info(f"  Collected: {target.name}")
         
-        # Check if we got any images
+        # Check if we got the expected number of images
+        expected_images = len(prompts_list)
         if image_count == 0:
             logging.error("No images were downloaded from any kernel")
             raise RuntimeError("Image generation failed: no images downloaded from any kernel")
+        elif image_count != expected_images:
+            logging.error(f"Incomplete image generation: expected {expected_images} images but got {image_count}")
+            raise RuntimeError(
+                f"Image generation incomplete: expected {expected_images} images "
+                f"but only got {image_count}. Some prompts failed to generate images."
+            )
         
         # Clean up temporary directories
         shutil.rmtree(deployment1_download_path, ignore_errors=True)
