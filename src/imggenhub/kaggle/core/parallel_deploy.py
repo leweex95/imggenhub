@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 # Kernel IDs for parallel execution
 DEPLOYMENT1_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment1"
-DEPLOYMENT2_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment2"
+DEPLOYMENT2_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment-2"
 
 # Threshold for parallel deployment
 PARALLEL_THRESHOLD = 4
@@ -78,7 +78,7 @@ def _create_deployment2_kernel_dir(kernel_path: Path, notebook: Path) -> Path:
     
     # Modify for deployment2 kernel
     metadata["id"] = DEPLOYMENT2_KERNEL_ID
-    metadata["title"] = "Stable Diffusion Batch Generator Deployment2"
+    metadata["title"] = "Stable Diffusion Batch Generator Deployment 2"
     metadata["code_file"] = notebook_name
     
     deployment2_metadata_path = deployment2_dir / "kernel-metadata.json"
