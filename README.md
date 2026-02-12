@@ -15,7 +15,7 @@ ImgGenHub is a personal image generation hub that connects to web-based image ge
 #### **Kaggle-powered image generation**
 - **Automated pipeline**: Deploy → Monitor → Download workflow
 - **Automated secret management**: Local `.env` secret detected and auto-uploaded to Kaggle dataset
-- **Multiple models**: Supports Stable Diffusion variants, Flux.1-schnell GGUF quantized (Q4) version and Flux.1-schnell bf16 version.
+- **Multiple models**: Supports Stable Diffusion variants, SDXL finetunes, Stable Diffusion 3.5 (large/medium), Wan/Chroma 2.1, Qwen Image series, Illustrious/Pony SDXL checkpoints, Flux.1-schnell GGUF quantized (Q4) version and Flux.1-schnell bf16 version.
 
 #### **Vast.ai support** (todo)
 
@@ -97,6 +97,145 @@ poetry run imggenhub \
   --refiner_precision fp16 \
   --gpu
 ```
+
+### SDXL finetune (JuggernautXL)
+
+```bash
+poetry run imggenhub \
+  --prompt "cinematic portrait, ultra detailed" \
+  --model_id "RunDiffusion/Juggernaut-XL-v9" \
+  --steps 8 \
+  --guidance 5.0 \
+  --img_width 512 \
+  --img_height 512 \
+  --precision fp16 \
+  --gpu
+```
+
+### Stable Diffusion 3.5 medium
+
+```bash
+poetry run imggenhub \
+  --prompt "minimalist architecture photo, natural light" \
+  --model_id "stabilityai/stable-diffusion-3.5-medium" \
+  --steps 8 \
+  --guidance 4.5 \
+  --img_width 512 \
+  --img_height 512 \
+  --precision fp16 \
+  --gpu
+```
+
+### Stable Diffusion 3.5 large
+
+```bash
+poetry run imggenhub \
+  --prompt "award-winning product photography, studio lighting" \
+  --model_id "stabilityai/stable-diffusion-3.5-large" \
+  --steps 8 \
+  --guidance 4.5 \
+  --img_width 512 \
+  --img_height 512 \
+  --precision fp16 \
+  --gpu
+```
+
+### Wan/Chroma 2.1 family
+
+```bash
+poetry run imggenhub \
+  --prompt "retro-futuristic city street at sunrise" \
+  --model_id "Wan-AI/Wan2.1-T2I-14B" \
+  --steps 6 \
+  --guidance 4.0 \
+  --img_width 512 \
+  --img_height 512 \
+  --precision fp16 \
+  --gpu
+```
+
+### Qwen image series (low-VRAM-friendly checkpoint)
+
+```bash
+poetry run imggenhub \
+  --prompt "editorial fashion photo, dynamic lighting" \
+  --model_id "AlekseyCalvin/QWEN_IMAGE_nf4_w_AbliteratedTE_Diffusers" \
+  --steps 1 \
+  --guidance 1.0 \
+  --img_width 64 \
+  --img_height 64 \
+  --precision fp16 \
+  --gpu
+```
+
+### Illustrious / Pony family
+
+```bash
+poetry run imggenhub \
+  --prompt "anime portrait, soft cinematic background" \
+  --model_id "Runware/Pony_Diffusion_V6_XL" \
+  --steps 1 \
+  --guidance 1.0 \
+  --img_width 64 \
+  --img_height 64 \
+  --precision fp32 \
+  --refiner_steps 1 \
+  --refiner_guidance 1.0 \
+  --gpu
+```
+
+### YAML snippets
+
+`imggenhub` continues to use the same YAML settings file:
+
+```yaml
+# src/imggenhub/kaggle/config/kaggle_settings.yaml
+gpu_limit: 2
+deployment_timeout_minutes: 30
+polling_interval_seconds: 60
+retry_interval_seconds: 60
+```
+
+Optional model presets for YAML-based wrappers (keys map 1:1 to CLI flags):
+
+```yaml
+model_presets:
+  sdxl_juggernaut:
+    model_id: "RunDiffusion/Juggernaut-XL-v9"
+    precision: "fp16"
+    steps: 8
+    guidance: 5.0
+    img_width: 512
+    img_height: 512
+  sd35_medium:
+    model_id: "stabilityai/stable-diffusion-3.5-medium"
+    precision: "fp16"
+    steps: 8
+    guidance: 4.5
+    img_width: 512
+    img_height: 512
+  qwen_image:
+    model_id: "AlekseyCalvin/QWEN_IMAGE_nf4_w_AbliteratedTE_Diffusers"
+    precision: "fp16"
+    steps: 1
+    guidance: 1.0
+    img_width: 64
+    img_height: 64
+  pony_xl:
+    model_id: "Runware/Pony_Diffusion_V6_XL"
+    precision: "fp32"
+    steps: 1
+    guidance: 1.0
+    img_width: 64
+    img_height: 64
+```
+
+### VRAM notes
+
+- 16GB Kaggle GPUs work for SDXL/SD3.5/Wan at low debug settings.
+- Qwen full checkpoints may exceed memory and disk limits; prefer quantized community checkpoints.
+- Some Pony checkpoints are published without `fp16` variants; use `fp32` when `fp16` variant files are missing.
+- SD3.5 and some other checkpoints may be gated on Hugging Face; ensure your token has accepted access for the selected model ID.
 
 ### **Supported flags**
 

@@ -1,12 +1,20 @@
 from unittest.mock import patch, MagicMock
 import logging
+import sys
+from pathlib import Path
 from imggenhub.kaggle import main
 
 def test_run_pipeline_success():
+    fake_image = MagicMock()
+    fake_image.is_file.return_value = True
+    fake_image.suffix = ".png"
+
     with patch('imggenhub.kaggle.main.download.run', return_value=True) as mock_download, \
          patch('imggenhub.kaggle.main.poll_status.run', return_value='kernelworkerstatus.complete') as mock_poll, \
          patch('imggenhub.kaggle.main.deploy.run') as mock_deploy, \
+         patch('imggenhub.kaggle.main.sync_hf_token', return_value=True), \
          patch('imggenhub.kaggle.main.resolve_prompts', return_value=['prompt']) as mock_resolve, \
+         patch('pathlib.Path.rglob', return_value=[fake_image]) as mock_rglob, \
          patch('pathlib.Path.mkdir') as mock_mkdir, \
          patch('logging.error') as mock_logging_error:  # Suppress error logging in tests
         
@@ -30,6 +38,7 @@ def test_run_pipeline_kernel_error():
     with patch('imggenhub.kaggle.main.download.run', return_value=True) as mock_download, \
          patch('imggenhub.kaggle.main.poll_status.run', return_value='kernelworkerstatus.error') as mock_poll, \
          patch('imggenhub.kaggle.main.deploy.run') as mock_deploy, \
+         patch('imggenhub.kaggle.main.sync_hf_token', return_value=True), \
          patch('imggenhub.kaggle.main.resolve_prompts', return_value=['prompt']) as mock_resolve, \
          patch('pathlib.Path.mkdir') as mock_mkdir, \
          patch('logging.error') as mock_logging_error:  # Suppress error logging in tests
@@ -50,3 +59,48 @@ def test_run_pipeline_kernel_error():
             assert False, "Expected RuntimeError"
         except RuntimeError:
             pass  # Expected
+
+
+def _run_main_with_args(args):
+    with patch.object(sys, "argv", args), \
+         patch("imggenhub.kaggle.main.setup_output_directory", return_value=Path("outputs/test_run")), \
+         patch("imggenhub.kaggle.main.log_cli_command"), \
+         patch("imggenhub.kaggle.main.validate_args"), \
+         patch("imggenhub.kaggle.main.run_pipeline") as mock_run_pipeline:
+        main.main()
+        return mock_run_pipeline
+
+
+def test_main_autodetects_modern_diffusion_notebook_for_sd35():
+    mock_run_pipeline = _run_main_with_args(
+        [
+            "imggenhub",
+            "--model_id", "stabilityai/stable-diffusion-3.5-medium",
+            "--guidance", "2.0",
+            "--steps", "5",
+            "--precision", "fp16",
+            "--img_width", "512",
+            "--img_height", "512",
+            "--prompt", "test prompt",
+        ]
+    )
+    kwargs = mock_run_pipeline.call_args.kwargs
+    assert kwargs["notebook"] == "./config/kaggle-modern-diffusion.ipynb"
+    assert kwargs["gpu"] is True
+
+
+def test_main_autodetects_stable_notebook_for_illustrious_pony():
+    mock_run_pipeline = _run_main_with_args(
+        [
+            "imggenhub",
+            "--model_id", "fancy/pony-diffusion-xl-v6",
+            "--guidance", "7.0",
+            "--steps", "10",
+            "--precision", "fp16",
+            "--img_width", "512",
+            "--img_height", "512",
+            "--prompt", "test prompt",
+        ]
+    )
+    kwargs = mock_run_pipeline.call_args.kwargs
+    assert kwargs["notebook"] == "./config/kaggle-stable-diffusion.ipynb"

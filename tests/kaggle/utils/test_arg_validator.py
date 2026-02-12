@@ -90,7 +90,9 @@ class TestIsKaggleModel:
             "tencent/unknown-model",
             "baidu/ernie-3.0-base-zh",
             "alibaba/Qwen-7B",
-            "bytedance/unknown-model"
+            "bytedance/unknown-model",
+            "qwen/Qwen-Image",
+            "wan-ai/Wan2.1-T2I-14B"
         ]
         for model_id in hf_orgs:
             assert is_kaggle_model(model_id) is False, f"Failed for {model_id}"

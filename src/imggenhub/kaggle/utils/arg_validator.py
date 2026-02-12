@@ -3,6 +3,15 @@ Argument validation utilities for Kaggle image generation pipeline.
 """
 import os
 from typing import Any
+from imggenhub.kaggle.utils.model_family import (
+    MODEL_FAMILY_FLUX_GGUF,
+    MODEL_FAMILY_ILLUSTRIOUS_PONY,
+    MODEL_FAMILY_QWEN_IMAGE,
+    MODEL_FAMILY_SD35,
+    MODEL_FAMILY_WAN21_CHROMA,
+    detect_model_family,
+    is_flux_gguf_model as _is_flux_gguf_model,
+)
 
 def is_kaggle_model(model_id: str) -> bool:
     if not model_id or '/' not in model_id:
@@ -15,22 +24,21 @@ def is_kaggle_model(model_id: str) -> bool:
         'stabilityai', 'black-forest-labs', 'runwayml', 'compvis', 'openai',
         'google', 'microsoft', 'facebook', 'huggingface', 'meta', 'meta-llama', 'anthropic',
         'eleutherai', 'bigscience', 'bigcode', 'salesforce', 'amazon', 'nvidia',
-        'intel', 'apple', 'tencent', 'baidu', 'alibaba', 'bytedance'
+        'intel', 'apple', 'tencent', 'baidu', 'alibaba', 'bytedance',
+        'qwen', 'qwenlm', 'qwen-vl', 'wan-ai', 'wan-video', 'city96',
+        'comfyanonymous', 'kandinsky-community', 'lllyasviel'
     }
     return owner not in hf_orgs
 
 def is_flux_gguf_model(model_id: str) -> bool:
-    if not model_id:
-        return False
-    model_lower = model_id.lower()
-    return ('flux' in model_lower and ('gguf' in model_lower or 'q4' in model_lower or 'q8' in model_lower))
+    return _is_flux_gguf_model(model_id)
 
 def validate_args(args: Any):
+    model_family = detect_model_family(getattr(args, 'model_id', None), getattr(args, 'model_filename', None))
+
     # Warn if model_filename is provided for non-GGUF models
-    is_sd_model = hasattr(args, 'model_id') and args.model_id and ("stabilityai" in args.model_id.lower())
-    is_flux_bf16 = hasattr(args, 'model_id') and args.model_id and ('flux' in args.model_id.lower() and 'gguf' not in args.model_id.lower())
-    is_flux_gguf = hasattr(args, 'model_filename') and args.model_filename and (args.model_id and 'gguf' in args.model_id.lower())
-    if hasattr(args, 'model_filename') and args.model_filename and (is_sd_model or is_flux_bf16):
+    has_model_filename = hasattr(args, 'model_filename') and args.model_filename
+    if has_model_filename and model_family != MODEL_FAMILY_FLUX_GGUF:
         print("\n" + "="*80)
         print("WARNING: --model_filename is ignored for this model type")
         print("="*80)
@@ -52,7 +60,7 @@ def validate_args(args: Any):
         raise ValueError("No prompts provided")
     if args.img_width is None or args.img_height is None:
         raise ValueError("Both --img_width and --img_height are required.")
-    if is_flux_gguf_model(args.model_id):
+    if model_family == MODEL_FAMILY_FLUX_GGUF:
         if args.img_width % 16 != 0 or args.img_height % 16 != 0:
             next_width = ((args.img_width // 16) + 1) * 16 if args.img_width % 16 != 0 else args.img_width
             next_height = ((args.img_height // 16) + 1) * 16 if args.img_height % 16 != 0 else args.img_height
@@ -75,11 +83,17 @@ def validate_args(args: Any):
 
     use_refiner = (getattr(args, 'refiner_model_id', None) is not None)
     if args.precision != "auto":
-        if is_kaggle_model(args.model_id):
-            pass
-        elif "flux" in args.model_id.lower():
-            pass
-        else:
+        should_skip_precision_validation = (
+            is_kaggle_model(args.model_id)
+            or "flux" in args.model_id.lower()
+            or model_family in {
+                MODEL_FAMILY_SD35,
+                MODEL_FAMILY_WAN21_CHROMA,
+                MODEL_FAMILY_QWEN_IMAGE,
+                MODEL_FAMILY_ILLUSTRIOUS_PONY,
+            }
+        )
+        if not should_skip_precision_validation:
             from imggenhub.kaggle.utils.precision_validator import PrecisionValidator
             hf_token = os.getenv("HF_TOKEN", "")
             detector = PrecisionValidator(hf_token)

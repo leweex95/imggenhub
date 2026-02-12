@@ -12,6 +12,17 @@ from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
 from imggenhub.kaggle.utils.arg_validator import validate_args
 from imggenhub.kaggle.utils.config_loader import load_kaggle_config
+from imggenhub.kaggle.utils.model_family import (
+    MODEL_FAMILY_FLUX_BF16,
+    MODEL_FAMILY_FLUX_GGUF,
+    MODEL_FAMILY_QWEN_IMAGE,
+    MODEL_FAMILY_SD35,
+    MODEL_FAMILY_WAN21_CHROMA,
+    detect_model_family,
+    is_flux_bf16_model,
+    is_flux_gguf_model,
+    supports_sdxl_refiner,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -220,6 +231,7 @@ def main():
     parser.add_argument("--t5xxl_filename", type=str, default=None, help="FLUX GGUF ONLY: T5-XXL model filename (auto-resolved if not provided)")
 
     args = parser.parse_args()
+    model_family = detect_model_family(args.model_id, args.model_filename)
 
     # Validate arguments strictly before any auto-detection or notebook selection
     try:
@@ -243,10 +255,8 @@ def main():
 
     # Auto-detect notebook based on model type if not specified
     if args.notebook is None:
-        # Check if FLUX GGUF based on explicit parameters or model_id
-        is_gguf = (args.model_filename or (args.model_id and _is_flux_gguf_model(args.model_id)))
-        is_bf16 = args.model_id and _is_flux_bf16_model(args.model_id)
-        if is_gguf:
+        print(f"Detected model family: {model_family}")
+        if model_family == MODEL_FAMILY_FLUX_GGUF:
             args.notebook = "./config/kaggle-flux-gguf.ipynb"
             print(f"Auto-detected FLUX GGUF model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX GGUF models
@@ -259,7 +269,7 @@ def main():
                 print("Automatically enabling GPU mode...")
                 print("="*80 + "\n")
                 args.gpu = True
-        elif is_bf16:
+        elif model_family == MODEL_FAMILY_FLUX_BF16:
             args.notebook = "./config/kaggle-flux-schnell-bf16.ipynb"
             print(f"Auto-detected FLUX bf16 model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX bf16 models
@@ -272,12 +282,23 @@ def main():
                 print("Automatically enabling GPU mode...")
                 print("="*80 + "\n")
                 args.gpu = True
+        elif model_family in {MODEL_FAMILY_SD35, MODEL_FAMILY_WAN21_CHROMA, MODEL_FAMILY_QWEN_IMAGE}:
+            args.notebook = "./config/kaggle-modern-diffusion.ipynb"
+            print(f"Auto-detected modern diffusion model, using notebook: {args.notebook}")
+            if not args.gpu:
+                print("\n" + "="*80)
+                print("WARNING: MODERN DIFFUSION MODELS RECOMMEND GPU!")
+                print("="*80)
+                print("You did NOT specify --gpu flag.")
+                print("Auto-enabling GPU mode to reduce memory risk and runtime.")
+                print("="*80 + "\n")
+                args.gpu = True
         else:
             args.notebook = "./config/kaggle-stable-diffusion.ipynb"
             print(f"Using default notebook: {args.notebook}")
     
     # Validate FLUX model dimensions must be multiples of 16
-    if args.model_id and _is_flux_gguf_model(args.model_id):
+    if model_family == MODEL_FAMILY_FLUX_GGUF:
         # Warn if guidance > 1.0 for FLUX GGUF models
         if args.guidance > 1.0:
             print("\n" + "="*80)
@@ -311,16 +332,12 @@ def main():
     # Precision is now required; no auto-detection
     logging.info(f"Using explicit precision: {args.precision}")
 
-    # Warn if refiner flags are used with Flux models (they are ignored)
-    is_flux_model = args.model_id and (_is_flux_gguf_model(args.model_id) or _is_flux_bf16_model(args.model_id))
-    is_flux_gguf = args.model_filename or (args.model_id and _is_flux_gguf_model(args.model_id))
-    is_flux_bf16 = args.model_id and _is_flux_bf16_model(args.model_id)
-    
-    if (is_flux_model or is_flux_gguf or is_flux_bf16) and (args.refiner_model_id or args.refiner_guidance or args.refiner_steps or args.refiner_precision or args.refiner_negative_prompt):
+    # Warn if refiner flags are used for model families that don't support SDXL refiner flow
+    if not supports_sdxl_refiner(model_family) and (args.refiner_model_id or args.refiner_guidance or args.refiner_steps or args.refiner_precision or args.refiner_negative_prompt):
         print("\n" + "="*80)
-        print("WARNING: REFINER FLAGS IGNORED FOR FLUX MODELS")
+        print("WARNING: REFINER FLAGS IGNORED FOR THIS MODEL FAMILY")
         print("="*80)
-        print("You specified refiner-related flags with a Flux model.")
+        print(f"You specified refiner-related flags with model family: {model_family}.")
         print("The following flags will be ignored:")
         if args.refiner_model_id:
             print(f"  - --refiner_model_id: {args.refiner_model_id}")
@@ -332,7 +349,7 @@ def main():
             print(f"  - --refiner_precision: {args.refiner_precision}")
         if args.refiner_negative_prompt:
             print(f"  - --refiner_negative_prompt: {args.refiner_negative_prompt}")
-        print("Proceeding with Flux model generation...")
+        print("Proceeding with generation without refiner...")
         print("="*80 + "\n")
 
     # Validate arguments including precision availability
@@ -400,10 +417,7 @@ def _is_flux_gguf_model(model_id: str) -> bool:
     Check if a model ID refers to a FLUX GGUF model.
     These are quantized FLUX models in GGUF format.
     """
-    if not model_id:
-        return False
-    model_lower = model_id.lower()
-    return ('flux' in model_lower and ('gguf' in model_lower or 'q4' in model_lower or 'q8' in model_lower))
+    return is_flux_gguf_model(model_id)
 
 
 def _is_flux_bf16_model(model_id: str) -> bool:
@@ -411,10 +425,7 @@ def _is_flux_bf16_model(model_id: str) -> bool:
     Check if a model ID refers to a FLUX bf16 model.
     These are black-forest-labs/FLUX.1-schnell or similar full-precision models.
     """
-    if not model_id:
-        return False
-    model_lower = model_id.lower()
-    return ('flux' in model_lower and 'black-forest-labs' in model_lower) or model_id == "black-forest-labs/FLUX.1-schnell"
+    return is_flux_bf16_model(model_id)
 
 
 if __name__ == "__main__":
