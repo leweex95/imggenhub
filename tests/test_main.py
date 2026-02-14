@@ -23,7 +23,7 @@ def test_run_pipeline_success():
         main.run_pipeline(
             dest_path=dest_path,
             prompts_file='./config/prompts.json',
-            notebook='./config/kaggle-notebook-image-generation.ipynb',
+            notebook='./notebooks/kaggle-stable-diffusion.ipynb',
             kernel_path='./config',
             gpu=True,
             guidance=7.5,
@@ -49,7 +49,7 @@ def test_run_pipeline_kernel_error():
             main.run_pipeline(
                 dest_path=dest_path,
                 prompts_file='./config/prompts.json',
-                notebook='./config/kaggle-notebook-image-generation.ipynb',
+                notebook='./notebooks/kaggle-stable-diffusion.ipynb',
                 kernel_path='./config',
                 gpu=True,
                 guidance=7.5,
@@ -85,7 +85,7 @@ def test_main_autodetects_modern_diffusion_notebook_for_sd35():
         ]
     )
     kwargs = mock_run_pipeline.call_args.kwargs
-    assert kwargs["notebook"] == "./config/kaggle-modern-diffusion.ipynb"
+    assert kwargs["notebook"] == "./notebooks/kaggle-modern-diffusion.ipynb"
     assert kwargs["gpu"] is True
 
 
@@ -103,4 +103,4 @@ def test_main_autodetects_stable_notebook_for_illustrious_pony():
         ]
     )
     kwargs = mock_run_pipeline.call_args.kwargs
-    assert kwargs["notebook"] == "./config/kaggle-stable-diffusion.ipynb"
+    assert kwargs["notebook"] == "./notebooks/kaggle-stable-diffusion.ipynb"

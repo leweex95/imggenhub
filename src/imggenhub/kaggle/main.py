@@ -62,7 +62,13 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
 
     notebook = Path(notebook)
     if not notebook.is_absolute():
-        notebook = kernel_path / notebook.name  # Resolve notebook relative to kernel path
+        # First try resolving relative to kernel_path (backward compatibility)
+        alt_notebook = kernel_path / notebook.name
+        if alt_notebook.exists():
+            notebook = alt_notebook
+        else:
+            # Otherwise resolve relative to the current directory (imggenhub/kaggle/)
+            notebook = cwd / notebook
 
     prompts_list = resolve_prompts(prompts_file, prompt)
 
@@ -257,7 +263,7 @@ def main():
     if args.notebook is None:
         print(f"Detected model family: {model_family}")
         if model_family == MODEL_FAMILY_FLUX_GGUF:
-            args.notebook = "./config/kaggle-flux-gguf.ipynb"
+            args.notebook = "./notebooks/kaggle-flux-gguf.ipynb"
             print(f"Auto-detected FLUX GGUF model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX GGUF models
             if not args.gpu:
@@ -270,7 +276,7 @@ def main():
                 print("="*80 + "\n")
                 args.gpu = True
         elif model_family == MODEL_FAMILY_FLUX_BF16:
-            args.notebook = "./config/kaggle-flux-schnell-bf16.ipynb"
+            args.notebook = "./notebooks/kaggle-flux-schnell-bf16.ipynb"
             print(f"Auto-detected FLUX bf16 model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX bf16 models
             if not args.gpu:
@@ -283,7 +289,7 @@ def main():
                 print("="*80 + "\n")
                 args.gpu = True
         elif model_family in {MODEL_FAMILY_SD35, MODEL_FAMILY_WAN21_CHROMA, MODEL_FAMILY_QWEN_IMAGE}:
-            args.notebook = "./config/kaggle-modern-diffusion.ipynb"
+            args.notebook = "./notebooks/kaggle-modern-diffusion.ipynb"
             print(f"Auto-detected modern diffusion model, using notebook: {args.notebook}")
             if not args.gpu:
                 print("\n" + "="*80)
@@ -294,7 +300,7 @@ def main():
                 print("="*80 + "\n")
                 args.gpu = True
         else:
-            args.notebook = "./config/kaggle-stable-diffusion.ipynb"
+            args.notebook = "./notebooks/kaggle-stable-diffusion.ipynb"
             print(f"Using default notebook: {args.notebook}")
     
     # Validate FLUX model dimensions must be multiples of 16

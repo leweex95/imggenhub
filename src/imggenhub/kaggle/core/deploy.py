@@ -66,19 +66,23 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
             retry_interval = config.get("retry_interval_seconds", 60)
 
     
-    # Resolve notebook path relative to kernel_path
-    nb_path = Path(kernel_path) / notebook
-    if not nb_path.exists():
-        raise FileNotFoundError(f"Notebook not found: {nb_path}")
+    # Resolve notebook paths
+    source_nb_path = Path(notebook)
+    if not source_nb_path.exists():
+        raise FileNotFoundError(f"Notebook not found: {source_nb_path}")
     
-    # Load notebook
-    with open(nb_path, "r", encoding="utf-8") as f:
+    # The target notebook (for Kaggle push) must be inside kernel_path
+    target_nb_path = Path(kernel_path) / source_nb_path.name
+    
+    # Load notebook from source
+    with open(source_nb_path, "r", encoding="utf-8") as f:
         nb = json.load(f)
 
-    # Detect notebook type
-    is_flux_notebook = "flux" in str(notebook).lower()
-    is_flux_gguf_notebook = "flux-gguf" in str(notebook).lower()
-    is_flux_bf16_notebook = "flux-schnell-bf16" in str(notebook).lower()
+    # Detect notebook type based on filename
+    nb_lower = source_nb_path.name.lower()
+    is_flux_notebook = "flux" in nb_lower
+    is_flux_gguf_notebook = "flux-gguf" in nb_lower
+    is_flux_bf16_notebook = "flux-schnell-bf16" in nb_lower
 
     # For FLUX bf16 notebooks, do NOT inject dataset download
     # They download models directly from HuggingFace Hub using HF_TOKEN
@@ -142,8 +146,8 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
 
             cell["source"] = source
 
-    # Save updated notebook
-    with open(nb_path, "w", encoding="utf-8") as f:
+    # Save updated notebook to target location (inside kernel_path)
+    with open(target_nb_path, "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=2)
 
     # Update kernel metadata
@@ -180,9 +184,8 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     if gpu is not None:
         kernel_meta["enable_gpu"] = str(gpu).lower()
     
-    # Update code_file to point to the correct notebook
-    notebook_path = Path(notebook) if not isinstance(notebook, Path) else notebook
-    kernel_meta["code_file"] = notebook_path.name
+    # Update code_file to point to the correct notebook filename (inside kernel_path)
+    kernel_meta["code_file"] = target_nb_path.name
     
     # HF token dataset - always required for HuggingFace downloads
     HF_TOKEN_DATASET = "leventecsibi/imggenhub-hf-token"
@@ -211,12 +214,12 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     elif is_flux_bf16_notebook:
         # bf16 notebooks need HF token for model download
         kernel_meta["dataset_sources"] = [HF_TOKEN_DATASET]
-        print(f"[INFO] Attached HF token dataset for {notebook_path.name}")
+        print(f"[INFO] Attached HF token dataset for {target_nb_path.name}")
     else:
         # Stable diffusion notebooks now read HF token from dataset as well
         kernel_meta["dataset_sources"] = [HF_TOKEN_DATASET]
-        print(f"[INFO] Attached HF token dataset for {notebook_path.name}")
-    logging.info(f"Updated kernel metadata to use notebook: {notebook}")
+        print(f"[INFO] Attached HF token dataset for {target_nb_path.name}")
+    logging.info(f"Updated kernel metadata to use notebook: {target_nb_path.name}")
     
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(kernel_meta, f, indent=2)
@@ -225,15 +228,15 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     with open(metadata_path, "r", encoding="utf-8") as f:
         verify_meta = json.load(f)
     
-    if verify_meta.get("code_file") != notebook_path.name:
+    if verify_meta.get("code_file") != target_nb_path.name:
         raise RuntimeError(
             f"ERROR: Metadata update verification failed!\n"
-            f"  Expected code_file: {notebook_path.name}\n"
+            f"  Expected code_file: {target_nb_path.name}\n"
             f"  Got code_file: {verify_meta.get('code_file')}\n"
             f"  Metadata file: {metadata_path}"
         )
     
-    logging.info(f" VERIFIED: Metadata correctly updated from '{original_code_file}' to '{notebook_path.name}'")
+    logging.info(f" VERIFIED: Metadata correctly updated from '{original_code_file}' to '{target_nb_path.name}'")
     
     # Push via Kaggle CLI - try Poetry first, fallback to direct python
     kaggle_cmd = _get_kaggle_command()

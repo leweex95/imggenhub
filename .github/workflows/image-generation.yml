@@ -262,7 +262,7 @@ jobs:
           
           run_pipeline(
               prompts_file=None,
-              notebook='config/kaggle-notebook-image-generation.ipynb',
+              notebook='notebooks/kaggle-stable-diffusion.ipynb',
               kernel_path='config',
               gpu=gpu_enabled,
               dest='../../../' + os.getenv('DEST_FOLDER', 'output_images'),
@@ -358,7 +358,7 @@ jobs:
           
           run_pipeline(
               prompts_file=None,
-              notebook='config/kaggle-notebook-image-generation.ipynb',
+              notebook='notebooks/kaggle-stable-diffusion.ipynb',
               kernel_path='config',
               gpu=gpu_enabled,
               dest='../../../' + os.getenv('DEST_FOLDER', 'output_images'),
