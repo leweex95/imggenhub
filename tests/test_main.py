@@ -11,7 +11,7 @@ def test_run_pipeline_success():
 
     with patch('imggenhub.kaggle.main.download.run', return_value=True) as mock_download, \
          patch('imggenhub.kaggle.main.poll_status.run', return_value='kernelworkerstatus.complete') as mock_poll, \
-         patch('imggenhub.kaggle.main.deploy.run') as mock_deploy, \
+         patch('imggenhub.kaggle.main.deploy_kaggle_notebook') as mock_deploy, \
          patch('imggenhub.kaggle.main.sync_hf_token', return_value=True), \
          patch('imggenhub.kaggle.main.resolve_prompts', return_value=['prompt']) as mock_resolve, \
          patch('imggenhub.kaggle.main.save_prompt_mapping') as mock_save_mapping, \
@@ -38,7 +38,7 @@ def test_run_pipeline_success():
 def test_run_pipeline_kernel_error():
     with patch('imggenhub.kaggle.main.download.run', return_value=True) as mock_download, \
          patch('imggenhub.kaggle.main.poll_status.run', return_value='kernelworkerstatus.error') as mock_poll, \
-         patch('imggenhub.kaggle.main.deploy.run') as mock_deploy, \
+         patch('imggenhub.kaggle.main.deploy_kaggle_notebook') as mock_deploy, \
          patch('imggenhub.kaggle.main.sync_hf_token', return_value=True), \
          patch('imggenhub.kaggle.main.resolve_prompts', return_value=['prompt']) as mock_resolve, \
          patch('imggenhub.kaggle.main.save_prompt_mapping') as mock_save_mapping, \
@@ -77,12 +77,12 @@ def test_main_autodetects_modern_diffusion_notebook_for_sd35():
     mock_run_pipeline = _run_main_with_args(
         [
             "imggenhub",
-            "--model_id", "stabilityai/stable-diffusion-3.5-medium",
+            "--model-id", "stabilityai/stable-diffusion-3.5-medium",
             "--guidance", "2.0",
             "--steps", "5",
             "--precision", "fp16",
-            "--img_width", "512",
-            "--img_height", "512",
+            "--img-width", "512",
+            "--img-height", "512",
             "--prompt", "test prompt",
         ]
     )
@@ -95,12 +95,12 @@ def test_main_autodetects_modern_notebook_for_illustrious_pony():
     mock_run_pipeline = _run_main_with_args(
         [
             "imggenhub",
-            "--model_id", "fancy/pony-diffusion-xl-v6",
+            "--model-id", "fancy/pony-diffusion-xl-v6",
             "--guidance", "7.0",
             "--steps", "10",
             "--precision", "fp16",
-            "--img_width", "512",
-            "--img_height", "512",
+            "--img-width", "512",
+            "--img-height", "512",
             "--prompt", "test prompt",
         ]
     )
@@ -113,12 +113,12 @@ def test_main_calls_parallel_run_for_many_prompts():
     mock_run_pipeline = _run_main_with_args(
         [
             "imggenhub",
-            "--model_id", "stabilityai/stable-diffusion-xl-base-1.0",
+            "--model-id", "stabilityai/stable-diffusion-xl-base-1.0",
             "--guidance", "7.0",
             "--steps", "50",
             "--precision", "fp16",
-            "--img_width", "1024",
-            "--img_height", "1024",
+            "--img-width", "1024",
+            "--img-height", "1024",
             "--prompt", "prompt 1",
             "--prompt", "prompt 2",
             "--prompt", "prompt 3",

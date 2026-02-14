@@ -239,25 +239,25 @@ class TestValidateArgs:
     def test_missing_model_id_without_diffusion_params_raises_error(self):
         """Test that missing model_id without diffusion params raises error."""
         args = self.create_mock_args(model_id=None, diffusion_repo_id=None, diffusion_filename=None)
-        with pytest.raises(ValueError, match="--model_id is required"):
+        with pytest.raises(ValueError, match="--model-id is required"):
             validate_args(args)
 
     def test_missing_model_id_with_diffusion_repo_raises_error(self):
         """Test that missing model_id with diffusion_repo_id raises error."""
         args = self.create_mock_args(model_id=None, diffusion_repo_id="city96/FLUX.1-schnell-gguf")
-        with pytest.raises(ValueError, match="--model_id is required"):
+        with pytest.raises(ValueError, match="--model-id is required"):
             validate_args(args)
 
     def test_missing_model_id_with_diffusion_filename_raises_error(self):
         """Test that missing model_id with diffusion_filename raises error."""
         args = self.create_mock_args(model_id=None, diffusion_filename="flux1-schnell-Q4_0.gguf")
-        with pytest.raises(ValueError, match="--model_id is required"):
+        with pytest.raises(ValueError, match="--model-id is required"):
             validate_args(args)
 
     def test_model_filename_without_model_id_raises_error(self):
         """Test that model_filename without model_id raises error."""
         args = self.create_mock_args(model_id=None, model_filename="model.gguf")
-        with pytest.raises(ValueError, match="--model_id is required when --model_filename is provided"):
+        with pytest.raises(ValueError, match="--model-id is required when --model-filename is provided"):
             validate_args(args)
 
     def test_no_prompts_raises_error(self):
@@ -269,13 +269,13 @@ class TestValidateArgs:
     def test_missing_img_width_raises_error(self):
         """Test that missing img_width raises error."""
         args = self.create_mock_args(img_width=None)
-        with pytest.raises(ValueError, match="Both --img_width and --img_height are required"):
+        with pytest.raises(ValueError, match="Both --img-width and --img-height are required"):
             validate_args(args)
 
     def test_missing_img_height_raises_error(self):
         """Test that missing img_height raises error."""
         args = self.create_mock_args(img_height=None)
-        with pytest.raises(ValueError, match="Both --img_width and --img_height are required"):
+        with pytest.raises(ValueError, match="Both --img-width and --img-height are required"):
             validate_args(args)
 
     def test_flux_gguf_invalid_dimensions_raises_error(self):
@@ -393,7 +393,7 @@ class TestValidateArgs:
             refiner_model_id=None,
             refiner_precision="fp16"
         )
-        with pytest.raises(ValueError, match="--refiner_model_id is required when specifying --refiner_precision"):
+        with pytest.raises(ValueError, match="--refiner-model-id is required when specifying --refiner-precision"):
             validate_args(args)
 
     @patch('imggenhub.kaggle.utils.precision_validator.PrecisionValidator')
@@ -409,7 +409,7 @@ class TestValidateArgs:
             refiner_precision="int8"  # not available
         )
         # The function checks for refiner_guidance first, so expect that error
-        with pytest.raises(ValueError, match="--refiner_guidance is required when using a refiner model"):
+        with pytest.raises(ValueError, match="--refiner-guidance is required when using a refiner model"):
             validate_args(args)
 
     def test_refiner_without_guidance_raises_error(self):
@@ -418,7 +418,7 @@ class TestValidateArgs:
             refiner_model_id="someuser/refiner-model",
             refiner_guidance=None
         )
-        with pytest.raises(ValueError, match="--refiner_guidance is required when using a refiner model"):
+        with pytest.raises(ValueError, match="--refiner-guidance is required when using a refiner model"):
             validate_args(args)
 
     def test_refiner_without_steps_raises_error(self):
@@ -428,7 +428,7 @@ class TestValidateArgs:
             refiner_steps=None
         )
         # The function checks for refiner_guidance first, so expect that error
-        with pytest.raises(ValueError, match="--refiner_guidance is required when using a refiner model"):
+        with pytest.raises(ValueError, match="--refiner-guidance is required when using a refiner model"):
             validate_args(args)
 
     @patch('builtins.print')  # Mock print to capture warnings

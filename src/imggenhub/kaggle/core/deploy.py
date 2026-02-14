@@ -7,6 +7,7 @@ import subprocess
 import shutil
 import logging
 from imggenhub.kaggle.utils.config_loader import load_kaggle_config
+from imggenhub.kaggle.secrets import sync_hf_token
 
 
 def _update_param(source_lines, param_name, value, is_list=False):
@@ -36,7 +37,7 @@ def _update_param(source_lines, param_name, value, is_list=False):
     return source_lines
 
 
-def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, retry_interval=None, kernel_id=None, index_offset=0):
+def deploy_kaggle_notebook(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, retry_interval=None, kernel_id=None, index_offset=0):
     """
     Deploy Kaggle notebook kernel, optionally overriding prompts and model.
     Uses the specified notebook; user is responsible for matching notebook to model.

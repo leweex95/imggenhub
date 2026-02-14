@@ -134,7 +134,7 @@ def _deploy_single_kernel(
         notebook: Notebook path
         kernel_path: Kernel config directory
         kernel_id: Kernel identifier
-        deploy_kwargs: Additional kwargs for deploy.run
+        deploy_kwargs: Additional kwargs for deploy_kaggle_notebook
         
     Returns:
         Kernel ID that was deployed
@@ -142,7 +142,7 @@ def _deploy_single_kernel(
     logging.info(f"Deploying {len(prompts_list)} prompts to kernel: {kernel_id}")
     
     # Deploy using standard deploy module
-    deploy.run(
+    deploy.deploy_kaggle_notebook(
         prompts_list=prompts_list,
         notebook=notebook,
         kernel_path=kernel_path,
@@ -227,7 +227,7 @@ def run_parallel_pipeline(
         wait_timeout: Maximum wait time in minutes for GPU availability
         retry_interval: Interval in seconds between retries
         polling_interval: Interval in seconds between status polls
-        **deploy_kwargs: Additional arguments for deploy.run
+        **deploy_kwargs: Additional arguments for deploy_kaggle_notebook
     """
     # Load config for defaults if not provided
     if wait_timeout is None or retry_interval is None or polling_interval is None:

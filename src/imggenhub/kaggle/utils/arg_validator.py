@@ -40,26 +40,26 @@ def validate_args(args: Any):
     has_model_filename = hasattr(args, 'model_filename') and args.model_filename
     if has_model_filename and model_family != MODEL_FAMILY_FLUX_GGUF:
         print("\n" + "="*80)
-        print("WARNING: --model_filename is ignored for this model type")
+        print("WARNING: --model-filename is ignored for this model type")
         print("="*80)
-        print(f"You specified --model_filename ({args.model_filename}) for a model type that does not use it.")
-        print("Only GGUF quantized models require --model_filename.")
+        print(f"You specified --model-filename ({args.model_filename}) for a model type that does not use it.")
+        print("Only GGUF quantized models require --model-filename.")
         print("Proceeding with generation...")
         print("="*80 + "\n")
 
-    # Enforce --model_id required if --model_filename is provided
+    # Enforce --model-id required if --model-filename is provided
     if hasattr(args, 'model_filename') and args.model_filename:
         if not hasattr(args, 'model_id') or not args.model_id:
-            raise ValueError("Error: --model_id is required when --model_filename is provided. Please specify --model_id explicitly.")
+            raise ValueError("Error: --model-id is required when --model-filename is provided. Please specify --model-id explicitly.")
 
     # model_id is always required
     if not getattr(args, 'model_id', None):
-        raise ValueError("--model_id is required.")
+        raise ValueError("--model-id is required.")
 
     if not args.prompt and not args.prompts_file:
         raise ValueError("No prompts provided")
     if args.img_width is None or args.img_height is None:
-        raise ValueError("Both --img_width and --img_height are required.")
+        raise ValueError("Both --img-width and --img-height are required.")
     if model_family == MODEL_FAMILY_FLUX_GGUF:
         if args.img_width % 16 != 0 or args.img_height % 16 != 0:
             next_width = ((args.img_width // 16) + 1) * 16 if args.img_width % 16 != 0 else args.img_width
@@ -79,7 +79,7 @@ def validate_args(args: Any):
     
     if hasattr(args, 'wait_timeout') and args.wait_timeout is not None:
         if args.wait_timeout < 0:
-            raise ValueError("--wait_timeout must be a non-negative integer.")
+            raise ValueError("--wait-timeout must be a non-negative integer.")
 
     use_refiner = (getattr(args, 'refiner_model_id', None) is not None)
     if args.precision != "auto":
@@ -103,7 +103,7 @@ def validate_args(args: Any):
                 raise ValueError(f"Precision '{args.precision}' not available for model '{args.model_id}'. Available: {available_str}")
     # Check refiner requirements as soon as refiner_precision is set
     if args.refiner_precision and not getattr(args, 'refiner_model_id', None):
-        raise ValueError("--refiner_model_id is required when specifying --refiner_precision")
+        raise ValueError("--refiner-model-id is required when specifying --refiner-precision")
         refiner_model = args.refiner_model_id
         if is_kaggle_model(refiner_model):
             pass
@@ -117,8 +117,8 @@ def validate_args(args: Any):
                 raise ValueError(f"Refiner precision '{args.refiner_precision}' not available for model '{refiner_model}'. Available: {available_str}")
     if use_refiner:
         if args.refiner_guidance is None:
-            raise ValueError("--refiner_guidance is required when using a refiner model")
+            raise ValueError("--refiner-guidance is required when using a refiner model")
         if args.refiner_steps is None:
-            raise ValueError("--refiner_steps is required when using a refiner model")
+            raise ValueError("--refiner-steps is required when using a refiner model")
     if not args.prompt and not args.prompts_file:
-        raise ValueError("No prompts provided: specify --prompt or --prompts_file")
+        raise ValueError("No prompts provided: specify --prompt or --prompts-file")

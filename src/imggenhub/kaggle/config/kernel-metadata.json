@@ -1,19 +1,14 @@
 {
-  "id": "leventecsibi/stable-diffusion-batch-generator",
-  "title": "Stable Diffusion Batch Generator",
-  "code_file": "kaggle-flux-gguf.ipynb",
+  "id": "leventecsibi/sd35-test",
+  "title": "Sd35 Test",
+  "code_file": "kaggle-modern-diffusion.ipynb",
   "language": "python",
   "kernel_type": "notebook",
   "is_private": "true",
   "enable_gpu": "true",
   "enable_internet": "true",
   "dataset_sources": [
-    "leventecsibi/imggenhub-hf-token",
-    "leventecsibi/flux1-schnell-q4-zip",
-    "leventecsibi/vae-zip",
-    "leventecsibi/clip-l-zip",
-    "leventecsibi/t5xxl-zip",
-    "leventecsibi/sd-build-zip"
+    "leventecsibi/imggenhub-hf-token"
   ],
   "model_sources": [],
   "metadata": {

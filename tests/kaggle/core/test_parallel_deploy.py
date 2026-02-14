@@ -108,7 +108,7 @@ class TestCreateParallelKernelDir:
 class TestDeploySingleKernel:
     """Test cases for _deploy_single_kernel function."""
 
-    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.run')
+    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.deploy_kaggle_notebook')
     @patch('time.sleep')
     def test_deploy_single_kernel_success(self, mock_sleep, mock_deploy_run):
         """Test successful deployment on first attempt."""
@@ -136,10 +136,10 @@ class TestDeploySingleKernel:
         )
         mock_sleep.assert_not_called()
 
-    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.run')
+    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.deploy_kaggle_notebook')
     @patch('time.sleep')
     def test_deploy_single_kernel_propagates_errors(self, mock_sleep, mock_deploy_run):
-        """Deployment helper delegates retries to deploy.run and propagates errors."""
+        """Deployment helper delegates retries to deploy_kaggle_notebook and propagates errors."""
         mock_deploy_run.side_effect = Exception("409 Conflict")
 
         with pytest.raises(Exception, match="409 Conflict"):
@@ -154,7 +154,7 @@ class TestDeploySingleKernel:
         mock_deploy_run.assert_called_once()
         mock_sleep.assert_not_called()
 
-    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.run')
+    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.deploy_kaggle_notebook')
     @patch('time.sleep')
     def test_deploy_single_kernel_non_retryable_error(self, mock_sleep, mock_deploy_run):
         """Test deployment fails immediately on non-retryable error."""
