@@ -36,7 +36,7 @@ def _update_param(source_lines, param_name, value, is_list=False):
     return source_lines
 
 
-def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, retry_interval=None):
+def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, retry_interval=None, kernel_id=None, index_offset=0):
     """
     Deploy Kaggle notebook kernel, optionally overriding prompts and model.
     Uses the specified notebook; user is responsible for matching notebook to model.
@@ -55,6 +55,8 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
         ...
         wait_timeout (int): Maximum wait time in minutes for GPU availability.
         retry_interval (int): Interval in seconds between retries.
+        kernel_id (str): Optional override for Kaggle kernel ID (e.g., 'user/slug').
+        index_offset (int): Offset for image file naming (e.g., to continue numbering in parallel runs).
     """
     
     # Load config for defaults if not provided
@@ -102,6 +104,8 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
                 source = _update_param(source, "STEPS", steps)
             if precision:
                 source = _update_param(source, "PRECISION", precision)
+            if index_offset is not None:
+                source = _update_param(source, "INDEX_OFFSET", index_offset)
             # Override OUTPUT_DIR to "." so notebook writes to download root, not nested "images/" folder
             # This prevents images/images/ nesting when download path already ends in "images"
             source = _update_param(source, "OUTPUT_DIR", ".")
@@ -183,6 +187,14 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     
     if gpu is not None:
         kernel_meta["enable_gpu"] = str(gpu).lower()
+    
+    # Update kernel ID if provided
+    if kernel_id:
+        kernel_meta["id"] = kernel_id
+        logging.info(f"Overriding kernel ID to: {kernel_id}")
+        # Update title based on slug if none exists or if it's the default
+        slug = kernel_id.split("/")[-1]
+        kernel_meta["title"] = slug.replace("-", " ").title()
     
     # Update code_file to point to the correct notebook filename (inside kernel_path)
     kernel_meta["code_file"] = target_nb_path.name

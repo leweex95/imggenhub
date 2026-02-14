@@ -14,6 +14,7 @@ def test_run_pipeline_success():
          patch('imggenhub.kaggle.main.deploy.run') as mock_deploy, \
          patch('imggenhub.kaggle.main.sync_hf_token', return_value=True), \
          patch('imggenhub.kaggle.main.resolve_prompts', return_value=['prompt']) as mock_resolve, \
+         patch('imggenhub.kaggle.main.save_prompt_mapping') as mock_save_mapping, \
          patch('pathlib.Path.rglob', return_value=[fake_image]) as mock_rglob, \
          patch('pathlib.Path.mkdir') as mock_mkdir, \
          patch('logging.error') as mock_logging_error:  # Suppress error logging in tests
@@ -23,7 +24,7 @@ def test_run_pipeline_success():
         main.run_pipeline(
             dest_path=dest_path,
             prompts_file='./config/prompts.json',
-            notebook='./notebooks/kaggle-stable-diffusion.ipynb',
+            notebook='./notebooks/kaggle-modern-diffusion.ipynb',
             kernel_path='./config',
             gpu=True,
             guidance=7.5,
@@ -40,6 +41,7 @@ def test_run_pipeline_kernel_error():
          patch('imggenhub.kaggle.main.deploy.run') as mock_deploy, \
          patch('imggenhub.kaggle.main.sync_hf_token', return_value=True), \
          patch('imggenhub.kaggle.main.resolve_prompts', return_value=['prompt']) as mock_resolve, \
+         patch('imggenhub.kaggle.main.save_prompt_mapping') as mock_save_mapping, \
          patch('pathlib.Path.mkdir') as mock_mkdir, \
          patch('logging.error') as mock_logging_error:  # Suppress error logging in tests
         
@@ -49,7 +51,7 @@ def test_run_pipeline_kernel_error():
             main.run_pipeline(
                 dest_path=dest_path,
                 prompts_file='./config/prompts.json',
-                notebook='./notebooks/kaggle-stable-diffusion.ipynb',
+                notebook='./notebooks/kaggle-modern-diffusion.ipynb',
                 kernel_path='./config',
                 gpu=True,
                 guidance=7.5,
@@ -89,7 +91,7 @@ def test_main_autodetects_modern_diffusion_notebook_for_sd35():
     assert kwargs["gpu"] is True
 
 
-def test_main_autodetects_stable_notebook_for_illustrious_pony():
+def test_main_autodetects_modern_notebook_for_illustrious_pony():
     mock_run_pipeline = _run_main_with_args(
         [
             "imggenhub",
@@ -103,4 +105,50 @@ def test_main_autodetects_stable_notebook_for_illustrious_pony():
         ]
     )
     kwargs = mock_run_pipeline.call_args.kwargs
-    assert kwargs["notebook"] == "./notebooks/kaggle-stable-diffusion.ipynb"
+    assert kwargs["notebook"] == "./notebooks/kaggle-modern-diffusion.ipynb"
+
+
+def test_main_calls_parallel_run_for_many_prompts():
+    # We use the mock returned by _run_main_with_args
+    mock_run_pipeline = _run_main_with_args(
+        [
+            "imggenhub",
+            "--model_id", "stabilityai/stable-diffusion-xl-base-1.0",
+            "--guidance", "7.0",
+            "--steps", "50",
+            "--precision", "fp16",
+            "--img_width", "1024",
+            "--img_height", "1024",
+            "--prompt", "prompt 1",
+            "--prompt", "prompt 2",
+            "--prompt", "prompt 3",
+            "--prompt", "prompt 4",
+            "--prompt", "prompt 5",
+        ]
+    )
+    assert mock_run_pipeline.called is True
+    # The prompts should be passed to run_pipeline, which then delegates to parallel
+    # We can test the delegation in a separate test or assume it works because of should_use_parallel
+    assert len(mock_run_pipeline.call_args.kwargs.get("prompt", [])) == 5
+
+
+def test_run_pipeline_delegates_to_parallel():
+    with patch("imggenhub.kaggle.main.should_use_parallel", return_value=True), \
+         patch("imggenhub.kaggle.main.run_parallel_pipeline") as mock_parallel, \
+         patch("imggenhub.kaggle.main.sync_hf_token", return_value=True), \
+         patch("imggenhub.kaggle.main.resolve_prompts", return_value=["p1", "p2", "p3", "p4", "p5"]), \
+         patch("imggenhub.kaggle.main.save_prompt_mapping") as mock_save_mapping, \
+         patch("imggenhub.kaggle.main.load_kaggle_config", return_value={}):
+        
+        main.run_pipeline(
+            dest_path=Path("outputs/test"),
+            prompts_file=None,
+            notebook="notebook.ipynb",
+            kernel_path="config",
+            prompt=["p1", "p2", "p3", "p4", "p5"],
+            guidance=7.0,
+            steps=50,
+            precision="fp16"
+        )
+        assert mock_parallel.called is True
+        assert mock_parallel.called is True

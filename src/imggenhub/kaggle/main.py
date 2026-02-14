@@ -7,7 +7,7 @@ from imggenhub.kaggle.core import deploy, download
 from imggenhub.kaggle.core.parallel_deploy import run_parallel_pipeline, should_use_parallel
 from imggenhub.kaggle.secrets import sync_hf_token
 from imggenhub.kaggle.utils import poll_status
-from imggenhub.kaggle.utils.prompts import resolve_prompts
+from imggenhub.kaggle.utils.prompts import resolve_prompts, save_prompt_mapping
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
 from imggenhub.kaggle.utils.arg_validator import validate_args
@@ -71,6 +71,7 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             notebook = cwd / notebook
 
     prompts_list = resolve_prompts(prompts_file, prompt)
+    save_prompt_mapping(dest_path, prompts_list)
 
     logging.debug(f"Resolved paths:\n prompts_file={prompts_file}\n notebook={notebook}\n kernel_path={kernel_path}\n dest={dest_path}")
 
@@ -300,8 +301,8 @@ def main():
                 print("="*80 + "\n")
                 args.gpu = True
         else:
-            args.notebook = "./notebooks/kaggle-stable-diffusion.ipynb"
-            print(f"Using default notebook: {args.notebook}")
+            args.notebook = "./notebooks/kaggle-modern-diffusion.ipynb"
+            print(f"Using default generic notebook: {args.notebook}")
     
     # Validate FLUX model dimensions must be multiples of 16
     if model_family == MODEL_FAMILY_FLUX_GGUF:
