@@ -629,14 +629,14 @@ urllib3 = ">=1.15.1"
 
 [[package]]
 name = "kagglesdk"
-version = "0.1.13"
+version = "0.1.15"
 description = "Bindings to access kaggle's external-facing APIs"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "kagglesdk-0.1.13-py3-none-any.whl", hash = "sha256:76a96b6bd0379482b3e53cd8ecfa7d181e6cf2b43c105bee32798cd06cf93eab"},
-    {file = "kagglesdk-0.1.13.tar.gz", hash = "sha256:5cecab69ab0d242b6a760f146fc77e0810b34b46e90d3e4104e4a1ba37bcd39f"},
+    {file = "kagglesdk-0.1.15-py3-none-any.whl", hash = "sha256:f7b49e795d5d0d72ba3612e6e6a1f39296978dbc7cd44d2015502e8bb1039738"},
+    {file = "kagglesdk-0.1.15.tar.gz", hash = "sha256:a26ecc64b1334b5a4c5cadd076bdeb503c04eab51c10d7cac2ff04959c9baba0"},
 ]
 
 [package.dependencies]
@@ -2328,4 +2328,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "42187e667bd0a418d52ab04b755e91d4f9affd1509a9644a7b39d8eeafb36e08"
+content-hash = "f00f54884408b2c2c833594c3b7dffcf7c11a36be73b96a3fd348a17479abd13"

@@ -167,9 +167,9 @@ jobs:
           if not kaggle_username:
               raise NameError('KAGGLE_USERNAME environment variable is not set!')
           
-          deploy.run(
+          deploy.deploy_kaggle_notebook(
               prompts_list=prompts_list,
-              notebook=cwd / 'config/kaggle-notebook-image-generation.ipynb',
+              notebook=cwd / 'notebooks/kaggle-stable-diffusion.ipynb',
               kernel_path=cwd / 'config',
               gpu=gpu_enabled
           )
@@ -215,9 +215,9 @@ jobs:
           if not kaggle_username:
               raise NameError('KAGGLE_USERNAME environment variable is not set!')
           
-          deploy.run(
+          deploy.deploy_kaggle_notebook(
               prompts_list=prompts_list,
-              notebook=cwd / 'config/kaggle-notebook-image-generation.ipynb',
+              notebook=cwd / 'notebooks/kaggle-stable-diffusion.ipynb',
               kernel_path=cwd / 'config',
               gpu=gpu_enabled
           )

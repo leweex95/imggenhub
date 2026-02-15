@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 import tempfile
 import shutil
-from imggenhub.kaggle.core.parallel_deploy import split_prompts, should_use_parallel, _create_deployment2_kernel_dir, _deploy_single_kernel, _poll_kernel
+from imggenhub.kaggle.core.parallel_deploy import split_prompts, should_use_parallel, _create_parallel_kernel_dir, _deploy_single_kernel, _poll_kernel
 
 
 class TestSplitPrompts:
@@ -63,8 +63,8 @@ class TestShouldUseParallel:
         assert should_use_parallel(prompts) is False
 
 
-class TestCreateDeployment2KernelDir:
-    """Test cases for _create_deployment2_kernel_dir function."""
+class TestCreateParallelKernelDir:
+    """Test cases for _create_parallel_kernel_dir function."""
 
     @patch('tempfile.mkdtemp')
     @patch('shutil.copy2')
@@ -72,41 +72,43 @@ class TestCreateDeployment2KernelDir:
     @patch('builtins.open', new_callable=mock_open)
     @patch('json.load')
     @patch('json.dump')
-    def test_create_deployment2_kernel_dir(self, mock_json_dump, mock_json_load, mock_file_open, mock_exists, mock_copy, mock_mkdtemp):
-        """Test creating deployment2 kernel directory."""
+    def test_create_parallel_kernel_dir(self, mock_json_dump, mock_json_load, mock_file_open, mock_exists, mock_copy, mock_mkdtemp):
+        """Test creating parallel kernel directory."""
         # Setup mocks
-        mock_mkdtemp.return_value = "/tmp/deployment2_dir"
+        mock_mkdtemp.return_value = "/tmp/parallel_dir"
         mock_exists.return_value = True
         mock_json_load.return_value = {
-            "id": "deployment1-kernel",
-            "title": "Deployment1 Kernel",
+            "id": "original-kernel",
+            "title": "Original Kernel",
             "code_file": "notebook.ipynb"
         }
 
         # Test
         kernel_path = Path("/path/to/kernel")
         notebook = Path("notebook.ipynb")
-        result = _create_deployment2_kernel_dir(kernel_path, notebook)
+        kernel_id = "user/parallel-kernel"
+        title = "Parallel Kernel Title"
+        result = _create_parallel_kernel_dir(kernel_path, notebook, kernel_id, title)
 
         # Assertions
-        assert result == Path("/tmp/deployment2_dir")
-        mock_mkdtemp.assert_called_once_with(prefix="kaggle_deployment2_")
+        assert result == Path("/tmp/parallel_dir")
+        mock_mkdtemp.assert_called_once()
         mock_copy.assert_called_once()
         mock_json_load.assert_called_once()
         mock_json_dump.assert_called_once()
 
-        # Check that metadata was modified for deployment2
+        # Check that metadata was modified correctly
         call_args = mock_json_dump.call_args[0]
         modified_metadata = call_args[0]
-        assert modified_metadata["id"] == "leventecsibi/stable-diffusion-batch-generator-deployment2"
-        assert modified_metadata["title"] == "Stable Diffusion Batch Generator Deployment2"
+        assert modified_metadata["id"] == kernel_id
+        assert modified_metadata["title"] == title
         assert modified_metadata["code_file"] == "notebook.ipynb"
 
 
 class TestDeploySingleKernel:
     """Test cases for _deploy_single_kernel function."""
 
-    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.run')
+    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.deploy_kaggle_notebook')
     @patch('time.sleep')
     def test_deploy_single_kernel_success(self, mock_sleep, mock_deploy_run):
         """Test successful deployment on first attempt."""
@@ -129,35 +131,30 @@ class TestDeploySingleKernel:
             prompts_list=prompts_list,
             notebook=notebook,
             kernel_path=kernel_path,
+            kernel_id=kernel_id,
             **deploy_kwargs
         )
         mock_sleep.assert_not_called()
 
-    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.run')
+    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.deploy_kaggle_notebook')
     @patch('time.sleep')
-    def test_deploy_single_kernel_retry_success(self, mock_sleep, mock_deploy_run):
-        """Test deployment succeeds after retry on conflict error."""
-        mock_deploy_run.side_effect = [Exception("409 Conflict"), None]
+    def test_deploy_single_kernel_propagates_errors(self, mock_sleep, mock_deploy_run):
+        """Deployment helper delegates retries to deploy_kaggle_notebook and propagates errors."""
+        mock_deploy_run.side_effect = Exception("409 Conflict")
 
-        prompts_list = ["prompt1"]
-        notebook = Path("notebook.ipynb")
-        kernel_path = Path("/path/to/kernel")
-        kernel_id = "test-kernel"
-        deploy_kwargs = {}
+        with pytest.raises(Exception, match="409 Conflict"):
+            _deploy_single_kernel(
+                prompts_list=["prompt1"],
+                notebook=Path("notebook.ipynb"),
+                kernel_path=Path("/path/to/kernel"),
+                kernel_id="test-kernel",
+                deploy_kwargs={}
+            )
 
-        result = _deploy_single_kernel(
-            prompts_list=prompts_list,
-            notebook=notebook,
-            kernel_path=kernel_path,
-            kernel_id=kernel_id,
-            deploy_kwargs=deploy_kwargs
-        )
+        mock_deploy_run.assert_called_once()
+        mock_sleep.assert_not_called()
 
-        assert result == kernel_id
-        assert mock_deploy_run.call_count == 2
-        mock_sleep.assert_called_once_with(30)
-
-    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.run')
+    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.deploy_kaggle_notebook')
     @patch('time.sleep')
     def test_deploy_single_kernel_non_retryable_error(self, mock_sleep, mock_deploy_run):
         """Test deployment fails immediately on non-retryable error."""
@@ -175,26 +172,6 @@ class TestDeploySingleKernel:
         mock_deploy_run.assert_called_once()
         mock_sleep.assert_not_called()
 
-    @patch('imggenhub.kaggle.core.parallel_deploy.deploy.run')
-    @patch('time.sleep')
-    def test_deploy_single_kernel_max_retries_exhausted(self, mock_sleep, mock_deploy_run):
-        """Test deployment fails after max retries."""
-        mock_deploy_run.side_effect = Exception("409 Conflict")
-
-        with pytest.raises(Exception, match="409 Conflict"):
-            _deploy_single_kernel(
-                prompts_list=["prompt1"],
-                notebook=Path("notebook.ipynb"),
-                kernel_path=Path("/path/to/kernel"),
-                kernel_id="test-kernel",
-                deploy_kwargs={},
-                max_retries=2
-            )
-
-        assert mock_deploy_run.call_count == 2
-        assert mock_sleep.call_count == 2
-
-
 class TestPollKernel:
     """Test cases for _poll_kernel function."""
 
@@ -203,7 +180,7 @@ class TestPollKernel:
         """Test polling succeeds."""
         mock_poll_run.return_value = "kernelworkerstatus.complete"
 
-        result = _poll_kernel("test-kernel", max_wait=1800)
+        result = _poll_kernel("test-kernel", max_wait=1800, poll_interval=15)
 
         assert result == "kernelworkerstatus.complete"
         mock_poll_run.assert_called_once_with(kernel_id="test-kernel", poll_interval=15)
@@ -214,19 +191,7 @@ class TestPollKernel:
         """Test polling recovers from poll errors."""
         mock_poll_run.side_effect = [Exception("Poll error"), "kernelworkerstatus.complete"]
 
-        result = _poll_kernel("test-kernel", max_wait=1800)
-
-        assert result == "kernelworkerstatus.complete"
-        assert mock_poll_run.call_count == 2
-        mock_sleep.assert_called_once_with(15)
-
-    @patch('imggenhub.kaggle.core.parallel_deploy.poll_status.run')
-    @patch('time.sleep')
-    def test_poll_kernel_error_recovery(self, mock_sleep, mock_poll_run):
-        """Test polling recovers from poll errors."""
-        mock_poll_run.side_effect = [Exception("Poll error"), "kernelworkerstatus.complete"]
-
-        result = _poll_kernel("test-kernel", max_wait=1800)
+        result = _poll_kernel("test-kernel", max_wait=1800, poll_interval=15)
 
         assert result == "kernelworkerstatus.complete"
         assert mock_poll_run.call_count == 2

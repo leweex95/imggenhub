@@ -7,6 +7,7 @@ import subprocess
 import shutil
 import logging
 from imggenhub.kaggle.utils.config_loader import load_kaggle_config
+from imggenhub.kaggle.secrets import sync_hf_token
 
 
 def _update_param(source_lines, param_name, value, is_list=False):
@@ -36,7 +37,7 @@ def _update_param(source_lines, param_name, value, is_list=False):
     return source_lines
 
 
-def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, retry_interval=None):
+def deploy_kaggle_notebook(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_model_id=None, guidance=None, steps=None, precision="fp16", negative_prompt=None, output_dir=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, retry_interval=None, kernel_id=None, index_offset=0):
     """
     Deploy Kaggle notebook kernel, optionally overriding prompts and model.
     Uses the specified notebook; user is responsible for matching notebook to model.
@@ -55,6 +56,8 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
         ...
         wait_timeout (int): Maximum wait time in minutes for GPU availability.
         retry_interval (int): Interval in seconds between retries.
+        kernel_id (str): Optional override for Kaggle kernel ID (e.g., 'user/slug').
+        index_offset (int): Offset for image file naming (e.g., to continue numbering in parallel runs).
     """
     
     # Load config for defaults if not provided
@@ -66,19 +69,23 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
             retry_interval = config.get("retry_interval_seconds", 60)
 
     
-    # Resolve notebook path relative to kernel_path
-    nb_path = Path(kernel_path) / notebook
-    if not nb_path.exists():
-        raise FileNotFoundError(f"Notebook not found: {nb_path}")
+    # Resolve notebook paths
+    source_nb_path = Path(notebook)
+    if not source_nb_path.exists():
+        raise FileNotFoundError(f"Notebook not found: {source_nb_path}")
     
-    # Load notebook
-    with open(nb_path, "r", encoding="utf-8") as f:
+    # The target notebook (for Kaggle push) must be inside kernel_path
+    target_nb_path = Path(kernel_path) / source_nb_path.name
+    
+    # Load notebook from source
+    with open(source_nb_path, "r", encoding="utf-8") as f:
         nb = json.load(f)
 
-    # Detect notebook type
-    is_flux_notebook = "flux" in str(notebook).lower()
-    is_flux_gguf_notebook = "flux-gguf" in str(notebook).lower()
-    is_flux_bf16_notebook = "flux-schnell-bf16" in str(notebook).lower()
+    # Detect notebook type based on filename
+    nb_lower = source_nb_path.name.lower()
+    is_flux_notebook = "flux" in nb_lower
+    is_flux_gguf_notebook = "flux-gguf" in nb_lower
+    is_flux_bf16_notebook = "flux-schnell-bf16" in nb_lower
 
     # For FLUX bf16 notebooks, do NOT inject dataset download
     # They download models directly from HuggingFace Hub using HF_TOKEN
@@ -98,6 +105,8 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
                 source = _update_param(source, "STEPS", steps)
             if precision:
                 source = _update_param(source, "PRECISION", precision)
+            if index_offset is not None:
+                source = _update_param(source, "INDEX_OFFSET", index_offset)
             # Override OUTPUT_DIR to "." so notebook writes to download root, not nested "images/" folder
             # This prevents images/images/ nesting when download path already ends in "images"
             source = _update_param(source, "OUTPUT_DIR", ".")
@@ -142,8 +151,8 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
 
             cell["source"] = source
 
-    # Save updated notebook
-    with open(nb_path, "w", encoding="utf-8") as f:
+    # Save updated notebook to target location (inside kernel_path)
+    with open(target_nb_path, "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=2)
 
     # Update kernel metadata
@@ -180,9 +189,16 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     if gpu is not None:
         kernel_meta["enable_gpu"] = str(gpu).lower()
     
-    # Update code_file to point to the correct notebook
-    notebook_path = Path(notebook) if not isinstance(notebook, Path) else notebook
-    kernel_meta["code_file"] = notebook_path.name
+    # Update kernel ID if provided
+    if kernel_id:
+        kernel_meta["id"] = kernel_id
+        logging.info(f"Overriding kernel ID to: {kernel_id}")
+        # Update title based on slug if none exists or if it's the default
+        slug = kernel_id.split("/")[-1]
+        kernel_meta["title"] = slug.replace("-", " ").title()
+    
+    # Update code_file to point to the correct notebook filename (inside kernel_path)
+    kernel_meta["code_file"] = target_nb_path.name
     
     # HF token dataset - always required for HuggingFace downloads
     HF_TOKEN_DATASET = "leventecsibi/imggenhub-hf-token"
@@ -211,12 +227,12 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     elif is_flux_bf16_notebook:
         # bf16 notebooks need HF token for model download
         kernel_meta["dataset_sources"] = [HF_TOKEN_DATASET]
-        print(f"[INFO] Attached HF token dataset for {notebook_path.name}")
+        print(f"[INFO] Attached HF token dataset for {target_nb_path.name}")
     else:
         # Stable diffusion notebooks now read HF token from dataset as well
         kernel_meta["dataset_sources"] = [HF_TOKEN_DATASET]
-        print(f"[INFO] Attached HF token dataset for {notebook_path.name}")
-    logging.info(f"Updated kernel metadata to use notebook: {notebook}")
+        print(f"[INFO] Attached HF token dataset for {target_nb_path.name}")
+    logging.info(f"Updated kernel metadata to use notebook: {target_nb_path.name}")
     
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(kernel_meta, f, indent=2)
@@ -225,15 +241,15 @@ def run(prompts_list, notebook, model_id, kernel_path=".", gpu=None, refiner_mod
     with open(metadata_path, "r", encoding="utf-8") as f:
         verify_meta = json.load(f)
     
-    if verify_meta.get("code_file") != notebook_path.name:
+    if verify_meta.get("code_file") != target_nb_path.name:
         raise RuntimeError(
             f"ERROR: Metadata update verification failed!\n"
-            f"  Expected code_file: {notebook_path.name}\n"
+            f"  Expected code_file: {target_nb_path.name}\n"
             f"  Got code_file: {verify_meta.get('code_file')}\n"
             f"  Metadata file: {metadata_path}"
         )
     
-    logging.info(f" VERIFIED: Metadata correctly updated from '{original_code_file}' to '{notebook_path.name}'")
+    logging.info(f" VERIFIED: Metadata correctly updated from '{original_code_file}' to '{target_nb_path.name}'")
     
     # Push via Kaggle CLI - try Poetry first, fallback to direct python
     kaggle_cmd = _get_kaggle_command()

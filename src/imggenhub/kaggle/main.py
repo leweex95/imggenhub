@@ -3,20 +3,31 @@ import argparse
 import subprocess
 import logging
 from pathlib import Path
-from imggenhub.kaggle.core import deploy, download
+from .core.deploy import deploy_kaggle_notebook, sync_hf_token
+from imggenhub.kaggle.core import download
 from imggenhub.kaggle.core.parallel_deploy import run_parallel_pipeline, should_use_parallel
-from imggenhub.kaggle.secrets import sync_hf_token
 from imggenhub.kaggle.utils import poll_status
-from imggenhub.kaggle.utils.prompts import resolve_prompts
+from imggenhub.kaggle.utils.prompts import resolve_prompts, save_prompt_mapping
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
 from imggenhub.kaggle.utils.arg_validator import validate_args
 from imggenhub.kaggle.utils.config_loader import load_kaggle_config
+from imggenhub.kaggle.utils.model_family import (
+    MODEL_FAMILY_FLUX_BF16,
+    MODEL_FAMILY_FLUX_GGUF,
+    MODEL_FAMILY_QWEN_IMAGE,
+    MODEL_FAMILY_SD35,
+    MODEL_FAMILY_WAN21_CHROMA,
+    detect_model_family,
+    is_flux_bf16_model,
+    is_flux_gguf_model,
+    supports_sdxl_refiner,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None):
+def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, sync_token=False, index_offset=0, kernel_id=None):
     """Run Kaggle image generation pipeline: sync HF token -> deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
     cwd = Path(__file__).parent
@@ -29,17 +40,20 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     retry_interval = config.get("retry_interval_seconds", 60)
 
     # Sync HF token to Kaggle dataset before deployment
-    logging.info("Syncing HF token to Kaggle dataset...")
-    try:
-        updated = sync_hf_token()
-        if updated:
-            logging.info("HF token dataset updated successfully")
-        else:
-            logging.info("HF token dataset is already up-to-date")
-    except Exception as e:
-        raise RuntimeError(f"Failed to sync HF token: {e}") from e
+    if sync_token:
+        logging.info("Syncing HF token to Kaggle dataset...")
+        try:
+            updated = sync_hf_token()
+            if updated:
+                logging.info("HF token dataset updated successfully")
+            else:
+                logging.info("HF token dataset is already up-to-date")
+        except Exception as e:
+            raise RuntimeError(f"Failed to sync HF token: {e}") from e
 
     # Resolve paths
+    base_pkg_path = Path(__file__).parent
+    
     if prompts_file:
         prompts_file = Path(prompts_file)
         if not prompts_file.is_absolute():
@@ -51,9 +65,21 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
 
     notebook = Path(notebook)
     if not notebook.is_absolute():
-        notebook = kernel_path / notebook.name  # Resolve notebook relative to kernel path
+        # 1. Try resolving relative to package notebooks/ folder
+        pkg_notebook = base_pkg_path / "notebooks" / notebook.name
+        # 2. Try resolving relative to kernel_path (backward compatibility)
+        alt_notebook = kernel_path / notebook.name
+        
+        if pkg_notebook.exists():
+            notebook = pkg_notebook
+        elif alt_notebook.exists():
+            notebook = alt_notebook
+        else:
+            # Otherwise resolve relative to the current directory
+            notebook = cwd / notebook
 
     prompts_list = resolve_prompts(prompts_file, prompt)
+    save_prompt_mapping(dest_path, prompts_list)
 
     logging.debug(f"Resolved paths:\n prompts_file={prompts_file}\n notebook={notebook}\n kernel_path={kernel_path}\n dest={dest_path}")
 
@@ -86,6 +112,7 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             "clip_l_filename": clip_l_filename,
             "t5xxl_repo_id": t5xxl_repo_id,
             "t5xxl_filename": t5xxl_filename,
+            "index_offset": index_offset,
         }
         
         run_parallel_pipeline(
@@ -107,7 +134,7 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     logging.info("Deploying kernel...")
     # Pass only the run name (e.g., '20251115_182905') so the notebook can
     # prepend 'output/' itself and avoid creating nested output paths.
-    deploy.run(
+    deploy_kaggle_notebook(
         prompts_list=prompts_list,
         notebook=notebook,
         model_id=model_id,
@@ -132,7 +159,9 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         t5xxl_repo_id=t5xxl_repo_id,
         t5xxl_filename=t5xxl_filename,
         wait_timeout=wait_timeout,
-        retry_interval=retry_interval
+        retry_interval=retry_interval,
+        kernel_id=kernel_id,
+        index_offset=index_offset
     )
     logging.debug("Deploy step completed")
 
@@ -141,17 +170,23 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     status = poll_status.run(poll_interval=config.get("polling_interval_seconds", 60))
     logging.debug("Poll status completed")
 
-    if status == "kernelworkerstatus.error":
-        log_path = dest_path / "stable-diffusion-batch-generator.log"
-        logging.error(f"Kernel failed. See log: {log_path}")
-        raise RuntimeError("Kaggle kernel failed during image generation. Aborting pipeline.")
-
-    # Step 3: Download output (using selective downloader to get only images)
-    logging.info("Downloading output artifacts (images only)...")
-    kernel_id = "leventecsibi/stable-diffusion-batch-generator"
+    # Step 3: Download output (using selective downloader to get only images and logs)
+    logging.info("Downloading output artifacts...")
+    # Use provided kernel_id or fallback to default
+    if not kernel_id:
+        username = config.get('kaggle_username') or "leventecsibi"
+        kernel_id = f"{username}/stable-diffusion-batch-generator"
+    
     success = download.run(kernel_id=kernel_id, dest=str(dest_path))
     logging.debug("Download completed")
-    
+
+    if status == "kernelworkerstatus.error":
+        # Look for log file in destination
+        log_files = list(dest_path.glob("*.log"))
+        log_msg = f"See log: {log_files[0]}" if log_files else "Log file not found."
+        logging.error(f"Kernel failed. {log_msg}")
+        raise RuntimeError("Kaggle kernel failed during image generation. Aborting pipeline.")
+
     if not success:
         logging.warning("Selective download did not complete successfully")
 
@@ -176,7 +211,7 @@ def main():
     # First parser for early args only (no help to avoid conflicts)
     early_parser = argparse.ArgumentParser(add_help=False)
     early_parser.add_argument("--dest", type=str, default=None)
-    early_parser.add_argument("--output_base_dir", type=str, default=None)
+    early_parser.add_argument("--output-base-dir", dest="output_base_dir", type=str, default=None)
     
     # Parse only known args to get output_base_dir and dest early
     early_args, remaining = early_parser.parse_known_args()
@@ -187,39 +222,43 @@ def main():
 
     # Parse full command line arguments
     parser = argparse.ArgumentParser(description="Kaggle image generation pipeline")
-    parser.add_argument("--prompts_file", type=str, default="./config/prompts.json")
+    parser.add_argument("--prompts-file", dest="prompts_file", type=str, default="./config/prompts.json")
     parser.add_argument("--notebook", type=str, default=None, help="Notebook to use (auto-detects based on model if not specified)")
-    parser.add_argument("--kernel_path", type=str, default="./config")
+    parser.add_argument("--kernel-id", dest="kernel_id", type=str, default=None, help="Specific Kaggle kernel ID to use (e.g. 'username/slug')")
+    parser.add_argument("--kernel-path", dest="kernel_path", type=str, default="./config")
     parser.add_argument("--gpu", action="store_true", help="Enable GPU for the kernel")
     parser.add_argument("--dest", type=str, default=None, help="Optional prefix for output folder (default: timestamp only)")
-    parser.add_argument("--output_base_dir", type=str, default=None, help="Base directory for output runs (default: current working directory)")
-    parser.add_argument("--model_id", type=str, default=None, help="Model ID (HuggingFace repo ID) for all models. For quantized models, use GGUF repo ID.")
-    parser.add_argument("--refiner_model_id", type=str, default=None, help="Refiner model ID (HuggingFace repo ID) for SDXL refiner.")
-    parser.add_argument("--prompt", action='append', default=None, help="Prompt(s) for generation. Can be used multiple times for multiple prompts. For many prompts, use --prompts_file.")
+    parser.add_argument("--output-base-dir", dest="output_base_dir", type=str, default=None, help="Base directory for output runs (default: current working directory)")
+    parser.add_argument("--model-id", dest="model_id", type=str, default=None, help="Model ID (HuggingFace repo ID) for all models. For quantized models, use GGUF repo ID.")
+    parser.add_argument("--refiner-model-id", dest="refiner_model_id", type=str, default=None, help="Refiner model ID (HuggingFace repo ID) for SDXL refiner.")
+    parser.add_argument("--prompt", action='append', default=None, help="Prompt(s) for generation. Can be used multiple times for multiple prompts. For many prompts, use --prompts-file.")
     parser.add_argument("--guidance", type=float, required=True, help="Guidance scale (7-12 recommended for photorealism)")
     parser.add_argument("--steps", type=int, required=True, help="Number of inference steps (50-100 for better quality)")
     parser.add_argument("--precision", type=str, required=True, choices=["fp32", "fp16", "bf16", "int8", "int4", "q4", "q5", "q6", "q8"],
                         help="Precision level (REQUIRED): fp32 (highest quality), fp16 (balanced), bf16 (recommended for Flux), q4/q5/q6/q8 (GGUF quantized), int8 (faster), int4 (fastest)")
-    parser.add_argument("--negative_prompt", type=str, default=None, help="Custom negative prompt for better quality control")
-    parser.add_argument("--refiner_guidance", type=float, default=None, help="STABLE DIFFUSION ONLY: Guidance scale for refiner (REQUIRED when using --refiner_model_id). Ignored for Flux models.")
-    parser.add_argument("--refiner_steps", type=int, default=None, help="STABLE DIFFUSION ONLY: Number of inference steps for refiner (REQUIRED when using --refiner_model_id). Ignored for Flux models.")
-    parser.add_argument("--refiner_precision", type=str, default=None, choices=["fp32", "fp16", "bf16", "int8", "int4"],
-                        help="STABLE DIFFUSION ONLY: Precision level for refiner (REQUIRED when using --refiner_model_id, or inherits from --precision). Ignored for Flux models.")
-    parser.add_argument("--refiner_negative_prompt", type=str, default=None, help="STABLE DIFFUSION ONLY: Custom negative prompt for refiner (defaults to same as --negative_prompt). Ignored for Flux models.")
-    parser.add_argument("--img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
-    parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
-    parser.add_argument("--wait_timeout", type=int, default=None, help="Maximum wait time in minutes for GPU availability (overrides YAML config)")
+    parser.add_argument("--negative-prompt", dest="negative_prompt", type=str, default=None, help="Custom negative prompt for better quality control")
+    parser.add_argument("--refiner-guidance", dest="refiner_guidance", type=float, default=None, help="STABLE DIFFUSION ONLY: Guidance scale for refiner (REQUIRED when using --refiner-model-id). Ignored for Flux models.")
+    parser.add_argument("--refiner-steps", dest="refiner_steps", type=int, default=None, help="STABLE DIFFUSION ONLY: Number of inference steps for refiner (REQUIRED when using --refiner-model-id). Ignored for Flux models.")
+    parser.add_argument("--refiner-precision", dest="refiner_precision", type=str, default=None, choices=["fp32", "fp16", "bf16", "int8", "int4"],
+                        help="STABLE DIFFUSION ONLY: Precision level for refiner (REQUIRED when using --refiner-model-id, or inherits from --precision). Ignored for Flux models.")
+    parser.add_argument("--refiner-negative-prompt", dest="refiner_negative_prompt", type=str, default=None, help="STABLE DIFFUSION ONLY: Custom negative prompt for refiner (defaults to same as --negative-prompt). Ignored for Flux models.")
+    parser.add_argument("--img-width", dest="img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
+    parser.add_argument("--img-height", dest="img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
+    parser.add_argument("--wait-timeout", dest="wait_timeout", type=int, default=None, help="Maximum wait time in minutes for GPU availability (overrides YAML config)")
+    parser.add_argument("--sync-token", action="store_true", help="Sync local HF_TOKEN to Kaggle dataset before deployment")
+    parser.add_argument("--index-offset", type=int, default=0, help="Offset for image indexing (useful for parallel runs)")
     
     # FLUX GGUF model configuration (quantized models only)
-    parser.add_argument("--model_filename", type=str, default=None, help="Model filename for quantized GGUF models (e.g., flux1-schnell-Q4_0.gguf)")
-    parser.add_argument("--vae_repo_id", type=str, default=None, help="FLUX GGUF ONLY: HuggingFace repo ID for VAE model (auto-resolved if not provided)")
-    parser.add_argument("--vae_filename", type=str, default=None, help="FLUX GGUF ONLY: VAE model filename (auto-resolved if not provided)")
-    parser.add_argument("--clip_l_repo_id", type=str, default=None, help="FLUX GGUF ONLY: HuggingFace repo ID for CLIP-L text encoder (auto-resolved if not provided)")
-    parser.add_argument("--clip_l_filename", type=str, default=None, help="FLUX GGUF ONLY: CLIP-L model filename (auto-resolved if not provided)")
-    parser.add_argument("--t5xxl_repo_id", type=str, default=None, help="FLUX GGUF ONLY: HuggingFace repo ID for T5-XXL text encoder (auto-resolved if not provided)")
-    parser.add_argument("--t5xxl_filename", type=str, default=None, help="FLUX GGUF ONLY: T5-XXL model filename (auto-resolved if not provided)")
+    parser.add_argument("--model-filename", dest="model_filename", type=str, default=None, help="Model filename for quantized GGUF models (e.g., flux1-schnell-Q4_0.gguf)")
+    parser.add_argument("--vae-repo-id", dest="vae_repo_id", type=str, default=None, help="FLUX GGUF ONLY: HuggingFace repo ID for VAE model (auto-resolved if not provided)")
+    parser.add_argument("--vae-filename", dest="vae_filename", type=str, default=None, help="FLUX GGUF ONLY: VAE model filename (auto-resolved if not provided)")
+    parser.add_argument("--clip-l-repo-id", dest="clip_l_repo_id", type=str, default=None, help="FLUX GGUF ONLY: HuggingFace repo ID for CLIP-L text encoder (auto-resolved if not provided)")
+    parser.add_argument("--clip-l-filename", dest="clip_l_filename", type=str, default=None, help="FLUX GGUF ONLY: CLIP-L model filename (auto-resolved if not provided)")
+    parser.add_argument("--t5xxl-repo-id", dest="t5xxl_repo_id", type=str, default=None, help="FLUX GGUF ONLY: HuggingFace repo ID for T5-XXL text encoder (auto-resolved if not provided)")
+    parser.add_argument("--t5xxl-filename", dest="t5xxl_filename", type=str, default=None, help="FLUX GGUF ONLY: T5-XXL model filename (auto-resolved if not provided)")
 
     args = parser.parse_args()
+    model_family = detect_model_family(args.model_id, args.model_filename)
 
     # Validate arguments strictly before any auto-detection or notebook selection
     try:
@@ -233,21 +272,19 @@ def main():
         print("\n" + "="*80)
         print("VALIDATION ERROR: MISSING IMAGE DIMENSIONS!")
         print("="*80)
-        print("Both --img_width and --img_height are REQUIRED.")
+        print("Both --img-width and --img-height are REQUIRED.")
         print("Please specify explicit image dimensions.")
         print("Examples:")
-        print("  - Stable Diffusion XL: --img_width 1024 --img_height 1024")
-        print("  - FLUX GGUF Q4: --img_width 512 --img_height 512")
+        print("  - Stable Diffusion XL: --img-width 1024 --img-height 1024")
+        print("  - FLUX GGUF Q4: --img-width 512 --img-height 512")
         print("="*80 + "\n")
         return
 
     # Auto-detect notebook based on model type if not specified
     if args.notebook is None:
-        # Check if FLUX GGUF based on explicit parameters or model_id
-        is_gguf = (args.model_filename or (args.model_id and _is_flux_gguf_model(args.model_id)))
-        is_bf16 = args.model_id and _is_flux_bf16_model(args.model_id)
-        if is_gguf:
-            args.notebook = "./config/kaggle-flux-gguf.ipynb"
+        print(f"Detected model family: {model_family}")
+        if model_family == MODEL_FAMILY_FLUX_GGUF:
+            args.notebook = "./notebooks/kaggle-flux-gguf.ipynb"
             print(f"Auto-detected FLUX GGUF model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX GGUF models
             if not args.gpu:
@@ -259,8 +296,8 @@ def main():
                 print("Automatically enabling GPU mode...")
                 print("="*80 + "\n")
                 args.gpu = True
-        elif is_bf16:
-            args.notebook = "./config/kaggle-flux-schnell-bf16.ipynb"
+        elif model_family == MODEL_FAMILY_FLUX_BF16:
+            args.notebook = "./notebooks/kaggle-flux-schnell-bf16.ipynb"
             print(f"Auto-detected FLUX bf16 model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX bf16 models
             if not args.gpu:
@@ -272,12 +309,23 @@ def main():
                 print("Automatically enabling GPU mode...")
                 print("="*80 + "\n")
                 args.gpu = True
+        elif model_family in {MODEL_FAMILY_SD35, MODEL_FAMILY_WAN21_CHROMA, MODEL_FAMILY_QWEN_IMAGE}:
+            args.notebook = "./notebooks/kaggle-modern-diffusion.ipynb"
+            print(f"Auto-detected modern diffusion model, using notebook: {args.notebook}")
+            if not args.gpu:
+                print("\n" + "="*80)
+                print("WARNING: MODERN DIFFUSION MODELS RECOMMEND GPU!")
+                print("="*80)
+                print("You did NOT specify --gpu flag.")
+                print("Auto-enabling GPU mode to reduce memory risk and runtime.")
+                print("="*80 + "\n")
+                args.gpu = True
         else:
-            args.notebook = "./config/kaggle-stable-diffusion.ipynb"
-            print(f"Using default notebook: {args.notebook}")
+            args.notebook = "./notebooks/kaggle-modern-diffusion.ipynb"
+            print(f"Using default generic notebook: {args.notebook}")
     
     # Validate FLUX model dimensions must be multiples of 16
-    if args.model_id and _is_flux_gguf_model(args.model_id):
+    if model_family == MODEL_FAMILY_FLUX_GGUF:
         # Warn if guidance > 1.0 for FLUX GGUF models
         if args.guidance > 1.0:
             print("\n" + "="*80)
@@ -311,28 +359,24 @@ def main():
     # Precision is now required; no auto-detection
     logging.info(f"Using explicit precision: {args.precision}")
 
-    # Warn if refiner flags are used with Flux models (they are ignored)
-    is_flux_model = args.model_id and (_is_flux_gguf_model(args.model_id) or _is_flux_bf16_model(args.model_id))
-    is_flux_gguf = args.model_filename or (args.model_id and _is_flux_gguf_model(args.model_id))
-    is_flux_bf16 = args.model_id and _is_flux_bf16_model(args.model_id)
-    
-    if (is_flux_model or is_flux_gguf or is_flux_bf16) and (args.refiner_model_id or args.refiner_guidance or args.refiner_steps or args.refiner_precision or args.refiner_negative_prompt):
+    # Warn if refiner flags are used for model families that don't support SDXL refiner flow
+    if not supports_sdxl_refiner(model_family) and (args.refiner_model_id or args.refiner_guidance or args.refiner_steps or args.refiner_precision or args.refiner_negative_prompt):
         print("\n" + "="*80)
-        print("WARNING: REFINER FLAGS IGNORED FOR FLUX MODELS")
+        print("WARNING: REFINER FLAGS IGNORED FOR THIS MODEL FAMILY")
         print("="*80)
-        print("You specified refiner-related flags with a Flux model.")
+        print(f"You specified refiner-related flags with model family: {model_family}.")
         print("The following flags will be ignored:")
         if args.refiner_model_id:
-            print(f"  - --refiner_model_id: {args.refiner_model_id}")
+            print(f"  - --refiner-model-id: {args.refiner_model_id}")
         if args.refiner_guidance:
-            print(f"  - --refiner_guidance: {args.refiner_guidance}")
+            print(f"  - --refiner-guidance: {args.refiner_guidance}")
         if args.refiner_steps:
-            print(f"  - --refiner_steps: {args.refiner_steps}")
+            print(f"  - --refiner-steps: {args.refiner_steps}")
         if args.refiner_precision:
-            print(f"  - --refiner_precision: {args.refiner_precision}")
+            print(f"  - --refiner-precision: {args.refiner_precision}")
         if args.refiner_negative_prompt:
-            print(f"  - --refiner_negative_prompt: {args.refiner_negative_prompt}")
-        print("Proceeding with Flux model generation...")
+            print(f"  - --refiner-negative-prompt: {args.refiner_negative_prompt}")
+        print("Proceeding with generation without refiner...")
         print("="*80 + "\n")
 
     # Validate arguments including precision availability
@@ -367,10 +411,10 @@ def main():
         t5xxl_repo_id=args.t5xxl_repo_id,
         t5xxl_filename=args.t5xxl_filename,
         wait_timeout=args.wait_timeout,
+        sync_token=args.sync_token,
+        index_offset=args.index_offset,
+        kernel_id=args.kernel_id,
     )
-
-
-    # ...existing code...
 
 
 def _is_kaggle_model(model_id: str) -> bool:
@@ -400,10 +444,7 @@ def _is_flux_gguf_model(model_id: str) -> bool:
     Check if a model ID refers to a FLUX GGUF model.
     These are quantized FLUX models in GGUF format.
     """
-    if not model_id:
-        return False
-    model_lower = model_id.lower()
-    return ('flux' in model_lower and ('gguf' in model_lower or 'q4' in model_lower or 'q8' in model_lower))
+    return is_flux_gguf_model(model_id)
 
 
 def _is_flux_bf16_model(model_id: str) -> bool:
@@ -411,10 +452,7 @@ def _is_flux_bf16_model(model_id: str) -> bool:
     Check if a model ID refers to a FLUX bf16 model.
     These are black-forest-labs/FLUX.1-schnell or similar full-precision models.
     """
-    if not model_id:
-        return False
-    model_lower = model_id.lower()
-    return ('flux' in model_lower and 'black-forest-labs' in model_lower) or model_id == "black-forest-labs/FLUX.1-schnell"
+    return is_flux_bf16_model(model_id)
 
 
 if __name__ == "__main__":

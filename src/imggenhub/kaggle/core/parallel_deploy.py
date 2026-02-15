@@ -22,8 +22,8 @@ from imggenhub.kaggle.utils.config_loader import load_kaggle_config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # Kernel IDs for parallel execution
-DEPLOYMENT1_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment1"
-DEPLOYMENT2_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment2"
+DEPLOYMENT1_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment-1"
+DEPLOYMENT2_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment-2"
 
 # Threshold for parallel deployment
 PARALLEL_THRESHOLD = 4
@@ -49,43 +49,74 @@ def should_use_parallel(prompts: List[str]) -> bool:
     return len(prompts) > PARALLEL_THRESHOLD
 
 
-def _create_deployment2_kernel_dir(kernel_path: Path, notebook: Path) -> Path:
+def _create_parallel_kernel_dir(kernel_path: Path, notebook: Path, kernel_id: str, title: str) -> Path:
     """
-    Create a temporary deployment2 kernel directory with its own metadata.
-    Copies only the needed notebook file and creates deployment2-specific metadata.
+    Create a temporary kernel directory for parallel deployment.
     
     Args:
-        kernel_path: Path to the deployment1 kernel config directory
-        notebook: Path to the notebook file to use
+        kernel_path: Original kernel config directory
+        notebook: Notebook path to use
+        kernel_id: Target Kaggle kernel ID
+        title: Target Kaggle kernel title
         
     Returns:
-        Path to temporary deployment2 kernel directory
+        Path to temporary kernel directory
     """
-    # Create temp directory that persists until explicitly cleaned up
-    deployment2_dir = Path(tempfile.mkdtemp(prefix="kaggle_deployment2_"))
+    temp_dir = Path(tempfile.mkdtemp(prefix=f"kaggle_{kernel_id.split('/')[-1]}_"))
     
-    # Copy the specific notebook file
+    # Copy notebook
     notebook_name = notebook.name
     source_notebook = kernel_path / notebook_name
     if not source_notebook.exists():
-        source_notebook = notebook  # Use the notebook path directly
-    shutil.copy2(source_notebook, deployment2_dir / notebook_name)
+        # Fallback to absolute path or search in notebooks directory
+        if notebook.exists():
+            source_notebook = notebook
+        else:
+            # Check src/imggenhub/kaggle/notebooks/
+            pkg_root = Path(__file__).parent.parent
+            source_notebook = pkg_root / "notebooks" / notebook_name
+
+    if not source_notebook.exists():
+        raise FileNotFoundError(f"Source notebook not found: {notebook_name}")
+        
+    shutil.copy2(source_notebook, temp_dir / notebook_name)
     
-    # Create deployment2-specific metadata
-    deployment1_metadata_path = kernel_path / "kernel-metadata.json"
-    with open(deployment1_metadata_path, "r", encoding="utf-8") as f:
-        metadata = json.load(f)
-    
-    # Modify for deployment2 kernel
-    metadata["id"] = DEPLOYMENT2_KERNEL_ID
-    metadata["title"] = "Stable Diffusion Batch Generator Deployment2"
+    # Load original metadata
+    metadata_path = kernel_path / "kernel-metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+    else:
+        # Default metadata fallback
+        metadata = {
+            "id": kernel_id,
+            "title": title,
+            "code_file": notebook_name,
+            "language": "python",
+            "kernel_type": "notebook",
+            "is_private": "true",
+            "enable_gpu": "true",
+            "enable_internet": "true",
+            "dataset_sources": [],
+            "model_sources": [],
+            "metadata": {
+                "kernelspec": {
+                    "name": "python3",
+                    "display_name": "Python 3",
+                    "language": "python"
+                }
+            }
+        }
+
+    # Override for this specific deployment
+    metadata["id"] = kernel_id
+    metadata["title"] = title
     metadata["code_file"] = notebook_name
     
-    deployment2_metadata_path = deployment2_dir / "kernel-metadata.json"
-    with open(deployment2_metadata_path, "w", encoding="utf-8") as f:
+    with open(temp_dir / "kernel-metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
     
-    return deployment2_dir
+    return temp_dir
 
 
 def _deploy_single_kernel(
@@ -103,18 +134,19 @@ def _deploy_single_kernel(
         notebook: Notebook path
         kernel_path: Kernel config directory
         kernel_id: Kernel identifier
-        deploy_kwargs: Additional kwargs for deploy.run
+        deploy_kwargs: Additional kwargs for deploy_kaggle_notebook
         
     Returns:
         Kernel ID that was deployed
     """
     logging.info(f"Deploying {len(prompts_list)} prompts to kernel: {kernel_id}")
     
-    # Deploy using standard deploy module (which now handles its own retry/wait logic)
-    deploy.run(
+    # Deploy using standard deploy module
+    deploy.deploy_kaggle_notebook(
         prompts_list=prompts_list,
         notebook=notebook,
         kernel_path=kernel_path,
+        kernel_id=kernel_id,
         **deploy_kwargs
     )
     logging.info(f"Successfully deployed kernel: {kernel_id}")
@@ -195,7 +227,7 @@ def run_parallel_pipeline(
         wait_timeout: Maximum wait time in minutes for GPU availability
         retry_interval: Interval in seconds between retries
         polling_interval: Interval in seconds between status polls
-        **deploy_kwargs: Additional arguments for deploy.run
+        **deploy_kwargs: Additional arguments for deploy_kaggle_notebook
     """
     # Load config for defaults if not provided
     if wait_timeout is None or retry_interval is None or polling_interval is None:
@@ -211,9 +243,14 @@ def run_parallel_pipeline(
     first_batch, second_batch = split_prompts(prompts_list)
     logging.info(f"Splitting {len(prompts_list)} prompts: {len(first_batch)} (deployment1) + {len(second_batch)} (deployment2)")
     
-    # Create temporary deployment2 kernel directory
-    deployment2_kernel_path = _create_deployment2_kernel_dir(kernel_path, notebook)
-    logging.info(f"Created deployment2 kernel directory: {deployment2_kernel_path}")
+    # Create temporary kernel directories for both deployments
+    deployment1_kernel_path = _create_parallel_kernel_dir(
+        kernel_path, notebook, DEPLOYMENT1_KERNEL_ID, "Stable Diffusion Batch Generator Deployment 1"
+    )
+    deployment2_kernel_path = _create_parallel_kernel_dir(
+        kernel_path, notebook, DEPLOYMENT2_KERNEL_ID, "Stable Diffusion Batch Generator Deployment 2"
+    )
+    logging.info(f"Created temp deployment dirs:\n  1: {deployment1_kernel_path}\n  2: {deployment2_kernel_path}")
     
     try:
         # Deploy both kernels
@@ -224,24 +261,23 @@ def run_parallel_pipeline(
         # Deploy deployment1 kernel first
         _deploy_single_kernel(
             prompts_list=first_batch,
-            notebook=notebook,
-            kernel_path=kernel_path,
+            notebook=deployment1_kernel_path / notebook.name,
+            kernel_path=deployment1_kernel_path,
             kernel_id=DEPLOYMENT1_KERNEL_ID,
-            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval}
+            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval, "index_offset": 0}
         )
         
-        # Wait before deploying deployment2 to avoid API conflicts
-        logging.info("Waiting 15 seconds before deploying deployment2 kernel...")
-        time.sleep(15)
+        # Wait longer before deploying deployment2 to avoid API conflicts or resource race
+        logging.info("Waiting 30 seconds before deploying deployment2 kernel...")
+        time.sleep(30)
         
         # Deploy deployment2 kernel
-        deployment2_notebook = deployment2_kernel_path / notebook.name
         _deploy_single_kernel(
             prompts_list=second_batch,
-            notebook=deployment2_notebook,
+            notebook=deployment2_kernel_path / notebook.name,
             kernel_path=deployment2_kernel_path,
             kernel_id=DEPLOYMENT2_KERNEL_ID,
-            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval}
+            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval, "index_offset": len(first_batch)}
         )
         
         logging.info("="*80)
@@ -357,7 +393,8 @@ def run_parallel_pipeline(
         logging.info("="*80)
         
     finally:
-        # Always clean up deployment2 kernel directory
-        if deployment2_kernel_path.exists():
-            shutil.rmtree(deployment2_kernel_path, ignore_errors=True)
-            logging.info(f"Cleaned up deployment2 directory: {deployment2_kernel_path}")
+        # Always clean up temporary kernel directories
+        for path in [deployment1_kernel_path, deployment2_kernel_path]:
+            if path and path.exists():
+                shutil.rmtree(path, ignore_errors=True)
+                logging.info(f"Cleaned up temp directory: {path}")

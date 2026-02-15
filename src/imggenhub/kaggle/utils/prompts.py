@@ -22,4 +22,12 @@ def resolve_prompts(prompts_file=None, prompt=None, prompts=None):
         else:
             raise FileNotFoundError(f"Prompts file not found: {prompts_file}")
 
-    raise ValueError("No prompts provided: specify --prompt or --prompts_file")
+    raise ValueError("No prompts provided: specify --prompt or --prompts-file")
+
+def save_prompt_mapping(dest_path: Path, prompts_list: list):
+    """Save a mapping of index to prompt in the output directory."""
+    mapping = {i + 1: prompt for i, prompt in enumerate(prompts_list)}
+    mapping_file = dest_path / "prompt_mapping.json"
+    with open(mapping_file, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, indent=4)
+    return mapping_file
