@@ -34,6 +34,25 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
 
     # Load Kaggle config
     config = load_kaggle_config()
+
+    # Step 0: Resolve kernel_id from metadata if not provided
+    if not kernel_id:
+        try:
+            metadata_path = kernel_path / "kernel-metadata.json"
+            if metadata_path.exists():
+                with open(metadata_path, 'r') as f:
+                    meta = json.load(f)
+                    kernel_id = meta.get('id')
+            
+            if not kernel_id:
+                # Fallback to default if metadata read fails or is missing ID
+                username = config.get('kaggle_username') or "leventecsibi"
+                kernel_id = f"{username}/sd35-test"
+        except Exception as e:
+            logging.warning(f"Failed to read kernel_id from metadata: {e}")
+            username = config.get('kaggle_username') or "leventecsibi"
+            kernel_id = f"{username}/sd35-test"
+
     if wait_timeout is None:
         wait_timeout = config.get("deployment_timeout_minutes", 30)
     
@@ -167,16 +186,11 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
 
     # Step 2: Poll status
     logging.info("Polling kernel status...")
-    status = poll_status.run(poll_interval=config.get("polling_interval_seconds", 60))
+    status = poll_status.run(kernel_id=kernel_id, poll_interval=config.get("polling_interval_seconds", 60))
     logging.debug("Poll status completed")
 
     # Step 3: Download output (using selective downloader to get only images and logs)
     logging.info("Downloading output artifacts...")
-    # Use provided kernel_id or fallback to default
-    if not kernel_id:
-        username = config.get('kaggle_username') or "leventecsibi"
-        kernel_id = f"{username}/stable-diffusion-batch-generator"
-    
     success = download.run(kernel_id=kernel_id, dest=str(dest_path))
     logging.debug("Download completed")
 

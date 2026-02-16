@@ -17,7 +17,6 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(m
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
-KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator"
 ALLOWED_NON_IMAGE_FILES = {"cli_command.txt", "stable-diffusion-batch-generator.log"}
 ARTIFACT_DIRECTORIES = {"stable-diffusion.cpp"}
 
@@ -66,7 +65,7 @@ def _list_local_image_files(dest_path: Path) -> Set[str]:
     return image_files
 
 
-def run(kernel_id: str = KERNEL_ID, dest: str = "output_images") -> bool:
+def run(kernel_id: str, dest: str = "output_images") -> bool:
     """Download ONLY image files from Kaggle kernel by monitoring local directory.
     
     Starts the Kaggle CLI download process and monitors the destination directory.
@@ -79,6 +78,8 @@ def run(kernel_id: str = KERNEL_ID, dest: str = "output_images") -> bool:
         dest: Destination directory for outputs
         
     Returns:
+        True if images were successfully downloaded, False otherwise
+    """
         True if images were successfully downloaded, False otherwise
     """
     dest_path = Path(dest)
