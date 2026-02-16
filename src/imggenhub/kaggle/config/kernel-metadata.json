@@ -1,6 +1,6 @@
 {
-  "id": "leventecsibi/stable-diffusion-batch-generator",
-  "title": "Stable Diffusion Batch Generator",
+  "id": "leventecsibi/stable-diffusion-batch-generator-deployment1",
+  "title": "Stable Diffusion Batch Generator Deployment1",
   "code_file": "kaggle-flux-gguf.ipynb",
   "language": "python",
   "kernel_type": "notebook",
