@@ -2,6 +2,7 @@
 import argparse
 import subprocess
 import logging
+import json
 from pathlib import Path
 from .core.deploy import deploy_kaggle_notebook, sync_hf_token
 from imggenhub.kaggle.core import download
@@ -15,8 +16,11 @@ from imggenhub.kaggle.utils.config_loader import load_kaggle_config
 from imggenhub.kaggle.utils.model_family import (
     MODEL_FAMILY_FLUX_BF16,
     MODEL_FAMILY_FLUX_GGUF,
+    MODEL_FAMILY_ILLUSTRIOUS_PONY,
     MODEL_FAMILY_QWEN_IMAGE,
     MODEL_FAMILY_SD35,
+    MODEL_FAMILY_SDXL,
+    MODEL_FAMILY_STABLE_DIFFUSION,
     MODEL_FAMILY_WAN21_CHROMA,
     detect_model_family,
     is_flux_bf16_model,
@@ -35,10 +39,15 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     # Load Kaggle config
     config = load_kaggle_config()
 
+    # Resolve paths
+    base_pkg_path = Path(__file__).parent
+    
     # Step 0: Resolve kernel_id from metadata if not provided
     if not kernel_id:
         try:
-            metadata_path = kernel_path / "kernel-metadata.json"
+            # Ensure kernel_path is a Path object before joining
+            k_path = Path(kernel_path)
+            metadata_path = k_path / "kernel-metadata.json"
             if metadata_path.exists():
                 with open(metadata_path, 'r') as f:
                     meta = json.load(f)
@@ -47,13 +56,13 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             if not kernel_id:
                 # Fallback to default if metadata read fails or is missing ID
                 username = config.get('kaggle_username') or "leventecsibi"
-                kernel_id = f"{username}/sd35-test"
+                kernel_id = f"{username}/stable-diffusion-batch-generator"
         except Exception as e:
             logging.warning(f"Failed to read kernel_id from metadata: {e}")
             username = config.get('kaggle_username') or "leventecsibi"
-            kernel_id = f"{username}/sd35-test"
-
-    if wait_timeout is None:
+            kernel_id = f"{username}/stable-diffusion-batch-generator"
+    
+    if prompts_file:
         wait_timeout = config.get("deployment_timeout_minutes", 30)
     
     retry_interval = config.get("retry_interval_seconds", 60)
@@ -334,6 +343,9 @@ def main():
                 print("Auto-enabling GPU mode to reduce memory risk and runtime.")
                 print("="*80 + "\n")
                 args.gpu = True
+        elif model_family in {MODEL_FAMILY_SDXL, MODEL_FAMILY_STABLE_DIFFUSION, MODEL_FAMILY_ILLUSTRIOUS_PONY}:
+            args.notebook = "./notebooks/kaggle-stable-diffusion.ipynb"
+            print(f"Auto-detected stable diffusion model, using notebook: {args.notebook}")
         else:
             args.notebook = "./notebooks/kaggle-modern-diffusion.ipynb"
             print(f"Using default generic notebook: {args.notebook}")

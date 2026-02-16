@@ -1,7 +1,7 @@
 {
-  "id": "leventecsibi/sd35-test",
-  "title": "Sd35 Test",
-  "code_file": "kaggle-modern-diffusion.ipynb",
+  "id": "leventecsibi/stable-diffusion-batch-generator",
+  "title": "Stable Diffusion Batch Generator",
+  "code_file": "kaggle-stable-diffusion.ipynb",
   "language": "python",
   "kernel_type": "notebook",
   "is_private": "true",

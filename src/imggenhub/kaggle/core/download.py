@@ -80,8 +80,6 @@ def run(kernel_id: str, dest: str = "output_images") -> bool:
     Returns:
         True if images were successfully downloaded, False otherwise
     """
-        True if images were successfully downloaded, False otherwise
-    """
     dest_path = Path(dest)
     dest_path.mkdir(parents=True, exist_ok=True)
     
