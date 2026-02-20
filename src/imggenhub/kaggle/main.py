@@ -2,11 +2,15 @@
 import argparse
 import subprocess
 import logging
+import os
+import tempfile
+import json
+import shutil
+import time
 from pathlib import Path
-from imggenhub.kaggle.core import deploy, download
+from typing import Any, Dict
+from kaggle_connector import JobManager, SelectiveDownloader, DatasetManager
 from imggenhub.kaggle.core.parallel_deploy import run_parallel_pipeline, should_use_parallel
-from imggenhub.kaggle.secrets import sync_hf_token
-from imggenhub.kaggle.utils import poll_status
 from imggenhub.kaggle.utils.prompts import resolve_prompts
 from imggenhub.kaggle.utils.cli import log_cli_command, setup_output_directory
 from imggenhub.kaggle.utils.filesystem import ensure_output_directory
@@ -16,7 +20,7 @@ from imggenhub.kaggle.utils.config_loader import load_kaggle_config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None):
+def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, accelerator=None):
     """Run Kaggle image generation pipeline: sync HF token -> deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
     cwd = Path(__file__).parent
@@ -31,11 +35,31 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     # Sync HF token to Kaggle dataset before deployment
     logging.info("Syncing HF token to Kaggle dataset...")
     try:
-        updated = sync_hf_token()
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+        hf_token = os.getenv("HF_TOKEN")
+        if not hf_token:
+            raise ValueError("HF_TOKEN environment variable is not set")
+            
+        from kaggle import api
+        username = api.config_values.get("username")
+        if not username:
+            raise ValueError("Kaggle username not found in config")
+        hf_token_dataset = f"{username}/imggenhub-hf-token"
+            
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_file = Path(tmp_dir) / "hf_token.json"
+            with open(token_file, "w") as f:
+                json.dump({"HF_TOKEN": hf_token}, f)
+            
+            dm = DatasetManager()
+            # Use same dataset ID as before
+            updated = dm.sync_dataset(hf_token_dataset, [token_file], version_notes="Sync from imggenhub core refactor")
+            
         if updated:
-            logging.info("HF token dataset updated successfully")
+            logging.info(f"HF token dataset {hf_token_dataset} updated successfully")
         else:
-            logging.info("HF token dataset is already up-to-date")
+            logging.info(f"HF token dataset {hf_token_dataset} is already up-to-date")
     except Exception as e:
         raise RuntimeError(f"Failed to sync HF token: {e}") from e
 
@@ -51,11 +75,21 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
 
     notebook = Path(notebook)
     if not notebook.is_absolute():
-        notebook = kernel_path / notebook.name  # Resolve notebook relative to kernel path
+        # Try local notebooks folder first, then kernel_path
+        local_notebook = cwd / "notebooks" / notebook.name
+        if local_notebook.exists():
+            notebook = local_notebook
+        else:
+            notebook = kernel_path / notebook.name  # Fallback to kernel path if not in notebooks
 
     prompts_list = resolve_prompts(prompts_file, prompt)
 
     logging.debug(f"Resolved paths:\n prompts_file={prompts_file}\n notebook={notebook}\n kernel_path={kernel_path}\n dest={dest_path}")
+
+    # Resolve username and kernel ID
+    from kaggle import api
+    username = api.config_values.get("username")
+    base_kernel_id = f"{username}/imggenhub-generator"
 
     # Check if parallel deployment should be used (prompts > 4)
     if should_use_parallel(prompts_list):
@@ -66,7 +100,8 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         
         # Build deploy kwargs for parallel pipeline
         deploy_kwargs = {
-            "model_id": model_id,
+            "username": username,
+            "base_kernel_id": base_kernel_id,
             "gpu": gpu,
             "refiner_model_id": refiner_model_id,
             "guidance": guidance,
@@ -96,6 +131,7 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             wait_timeout=wait_timeout,
             retry_interval=retry_interval,
             polling_interval=config.get("polling_interval_seconds", 60),
+            accelerator=accelerator,
             **deploy_kwargs
         )
         
@@ -104,61 +140,114 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         return
 
     # Sequential deployment for 4 or fewer prompts
-    logging.info("Deploying kernel...")
-    # Pass only the run name (e.g., '20251115_182905') so the notebook can
-    # prepend 'output/' itself and avoid creating nested output paths.
-    deploy.run(
-        prompts_list=prompts_list,
-        notebook=notebook,
-        model_id=model_id,
-        kernel_path=kernel_path,
-        gpu=gpu,
-        refiner_model_id=refiner_model_id,
-        guidance=guidance,
-        steps=steps,
-        precision=precision,
-        negative_prompt=negative_prompt,
-        output_dir=dest_path.name,
-        refiner_guidance=refiner_guidance,
-        refiner_steps=refiner_steps,
-        refiner_precision=refiner_precision,
-        refiner_negative_prompt=refiner_negative_prompt,
-        img_size=img_size,
-        model_filename=model_filename,
-        vae_repo_id=vae_repo_id,
-        vae_filename=vae_filename,
-        clip_l_repo_id=clip_l_repo_id,
-        clip_l_filename=clip_l_filename,
-        t5xxl_repo_id=t5xxl_repo_id,
-        t5xxl_filename=t5xxl_filename,
-        wait_timeout=wait_timeout,
-        retry_interval=retry_interval
-    )
-    logging.debug("Deploy step completed")
+    logging.info("Deploying kernel using Kaggle Connector...")
+    
+    # 1. Prepare Notebook (parameters injection)
+    # We still need the original notebook to copy it to a temp location before editing
+    with tempfile.TemporaryDirectory() as tmp_deploy_dir:
+        tmp_dir_path = Path(tmp_deploy_dir)
+        nb_name = Path(notebook).name
+        tmp_nb_path = tmp_dir_path / nb_name
+        shutil.copy2(notebook, tmp_nb_path)
+        
+        # Prepare parameters
+        params = {
+            "PROMPTS": prompts_list,
+            "MODEL_ID": model_id,
+            "GUIDANCE": guidance,
+            "STEPS": steps,
+            "PRECISION": precision,
+            "OUTPUT_DIR": ".",
+            "IMG_SIZE": img_size,
+            "KERNEL_ID": base_kernel_id
+        }
+        
+        # Flux GGUF specific
+        if "flux-gguf" in str(notebook).lower():
+            if model_filename: params["MODEL_FILENAME"] = model_filename
+            if vae_repo_id: params["VAE_REPO_ID"] = vae_repo_id
+            if vae_filename: params["VAE_FILENAME"] = vae_filename
+            if clip_l_repo_id: params["CLIP_L_REPO_ID"] = clip_l_repo_id
+            if clip_l_filename: params["CLIP_L_FILENAME"] = clip_l_filename
+            if t5xxl_repo_id: params["T5XXL_REPO_ID"] = t5xxl_repo_id
+            if t5xxl_filename: params["T5XXL_FILENAME"] = t5xxl_filename
+            
+        manager = JobManager()
+        manager.edit_notebook_params(str(tmp_nb_path), params)
+        
+        # DEBUG: Check if parameters were correctly injected
+        with open(tmp_nb_path, "r", encoding="utf-8") as f:
+            injected_nb = json.load(f)
+            for cell in injected_nb["cells"]:
+                if cell["cell_type"] == "code":
+                    src = "".join(cell["source"])
+                    logging.info(f"DEBUG: Cell source: {src[:500]}")
+                    if "PROMPTS =" in src:
+                        logging.info("VERIFICATION: Found PROMPTS in notebook.")
+        dataset_sources = [f"{username}/imggenhub-hf-token"]
+        if "flux-gguf" in str(notebook).lower():
+             dataset_sources.extend([
+                f"{username}/flux1-schnell-q4-zip",
+                f"{username}/vae-zip",
+                f"{username}/clip-l-zip",
+                f"{username}/t5xxl-zip",
+                f"{username}/sd-build-zip"
+             ])
+        
+        kernel_type = "notebook" if nb_name.endswith(".ipynb") else "script"
+        manager.create_metadata(
+            str(tmp_dir_path),
+            kernel_id=base_kernel_id,
+            code_file=nb_name,
+            kernel_type=kernel_type,
+            enable_gpu=gpu,
+            dataset_sources=dataset_sources,
+            accelerator=accelerator
+        )
+        
+        # DEBUG: Print metadata
+        with open(tmp_dir_path / "kernel-metadata.json", "r") as f:
+            logging.info(f"VERIFICATION: Created metadata: {f.read()}")
+        
+        # 3. Deploy
+        # We need to ensure the local kaggle-connector library is using the correct kernel_type
+        # If the library version is old, it might not support notebook type properly.
+        # But we saw in its code that it supports it via create_metadata.
+        
+        manager.deploy(str(tmp_dir_path), wait=True)
+        
+    logging.debug("Deploy step completed via connector")
 
     # Step 2: Poll status
-    logging.info("Polling kernel status...")
-    status = poll_status.run(poll_interval=config.get("polling_interval_seconds", 60))
+    # Wait for Kaggle API to register the new run
+    logging.info("Waiting 30 seconds for Kaggle API to register the new run...")
+    time.sleep(30)
+    
+    logging.info("Polling kernel status using Kaggle Connector...")
+    manager = JobManager(base_kernel_id)
+    status = manager.poll_until_complete()
     logging.debug("Poll status completed")
 
-    if status == "kernelworkerstatus.error":
+    if "error" in status.lower():
         log_path = dest_path / "stable-diffusion-batch-generator.log"
         logging.error(f"Kernel failed. See log: {log_path}")
-        raise RuntimeError("Kaggle kernel failed during image generation. Aborting pipeline.")
+        raise RuntimeError(f"Kaggle kernel {base_kernel_id} failed during image generation. Aborting pipeline.")
 
     # Step 3: Download output (using selective downloader to get only images)
     logging.info("Downloading output artifacts (images only)...")
-    kernel_id = "leventecsibi/stable-diffusion-batch-generator"
-    success = download.run(kernel_id=kernel_id, dest=str(dest_path))
+    downloader = SelectiveDownloader(base_kernel_id)
+    downloader.download_images(
+        dest_path=str(dest_path),
+        expected_image_count=len(prompts_list),
+        stable_count_patience=4,
+        polling_interval=config.get("polling_interval_seconds", 60)
+    )
     logging.debug("Download completed")
-    
-    if not success:
-        logging.warning("Selective download did not complete successfully")
 
     # Validate image count for sequential deployment
     if not should_use_parallel(prompts_list):
         image_extensions = {".png", ".jpg", ".jpeg"}
-        actual_images = len([f for f in dest_path.rglob("*") if f.is_file() and f.suffix.lower() in image_extensions])
+        actual_images = len([f for f in dest_path.rglob("*") if f.is_file() and f.suffix.lower() in image_extensions and f.name.startswith("gen_")])
         expected_images = len(prompts_list)
         if actual_images != expected_images:
             logging.error(f"Incomplete image generation: expected {expected_images} images but got {actual_images}")
@@ -187,9 +276,9 @@ def main():
 
     # Parse full command line arguments
     parser = argparse.ArgumentParser(description="Kaggle image generation pipeline")
-    parser.add_argument("--prompts_file", type=str, default="./config/prompts.json")
+    parser.add_argument("--prompts_file", type=str, default=None, help="JSON file containing list of prompts")
     parser.add_argument("--notebook", type=str, default=None, help="Notebook to use (auto-detects based on model if not specified)")
-    parser.add_argument("--kernel_path", type=str, default="./config")
+    parser.add_argument("--kernel_path", type=str, default=str(Path(__file__).parent / "notebooks"))
     parser.add_argument("--gpu", action="store_true", help="Enable GPU for the kernel")
     parser.add_argument("--dest", type=str, default=None, help="Optional prefix for output folder (default: timestamp only)")
     parser.add_argument("--output_base_dir", type=str, default=None, help="Base directory for output runs (default: current working directory)")
@@ -209,6 +298,7 @@ def main():
     parser.add_argument("--img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--wait_timeout", type=int, default=None, help="Maximum wait time in minutes for GPU availability (overrides YAML config)")
+    parser.add_argument("--accelerator", type=str, default=None, choices=["nvidia-t4-x2", "nvidia-p100"], help="Kaggle accelerator type (e.g., nvidia-t4-x2, nvidia-p100)")
     
     # FLUX GGUF model configuration (quantized models only)
     parser.add_argument("--model_filename", type=str, default=None, help="Model filename for quantized GGUF models (e.g., flux1-schnell-Q4_0.gguf)")
@@ -247,7 +337,7 @@ def main():
         is_gguf = (args.model_filename or (args.model_id and _is_flux_gguf_model(args.model_id)))
         is_bf16 = args.model_id and _is_flux_bf16_model(args.model_id)
         if is_gguf:
-            args.notebook = "./config/kaggle-flux-gguf.ipynb"
+            args.notebook = str(Path(__file__).parent / "notebooks/kaggle-flux-gguf.ipynb")
             print(f"Auto-detected FLUX GGUF model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX GGUF models
             if not args.gpu:
@@ -260,7 +350,7 @@ def main():
                 print("="*80 + "\n")
                 args.gpu = True
         elif is_bf16:
-            args.notebook = "./config/kaggle-flux-schnell-bf16.ipynb"
+            args.notebook = str(Path(__file__).parent / "notebooks/kaggle-flux-schnell-bf16.ipynb")
             print(f"Auto-detected FLUX bf16 model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX bf16 models
             if not args.gpu:
@@ -273,7 +363,7 @@ def main():
                 print("="*80 + "\n")
                 args.gpu = True
         else:
-            args.notebook = "./config/kaggle-stable-diffusion.ipynb"
+            args.notebook = str(Path(__file__).parent / "notebooks/kaggle-stable-diffusion.ipynb")
             print(f"Using default notebook: {args.notebook}")
     
     # Validate FLUX model dimensions must be multiples of 16
@@ -367,6 +457,7 @@ def main():
         t5xxl_repo_id=args.t5xxl_repo_id,
         t5xxl_filename=args.t5xxl_filename,
         wait_timeout=args.wait_timeout,
+        accelerator=args.accelerator,
     )
 
 

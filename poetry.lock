@@ -628,6 +628,27 @@ types-tqdm = "*"
 urllib3 = ">=1.15.1"
 
 [[package]]
+name = "kaggle-gpu-connector"
+version = "0.2.1"
+description = "Stand-alone connector for Kaggle GPU jobs and output management."
+optional = false
+python-versions = "^3.11"
+groups = ["main"]
+files = []
+develop = false
+
+[package.dependencies]
+kaggle = "^1.6"
+python-dotenv = "^1.0"
+pyyaml = "^6.0"
+
+[package.source]
+type = "git"
+url = "https://github.com/leweex95/kaggle-gpu-connector.git"
+reference = "HEAD"
+resolved_reference = "55c0c990bb0fa3a451574b184b181db0abf17ba6"
+
+[[package]]
 name = "kagglesdk"
 version = "0.1.13"
 description = "Bindings to access kaggle's external-facing APIs"
@@ -2328,4 +2349,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "42187e667bd0a418d52ab04b755e91d4f9affd1509a9644a7b39d8eeafb36e08"
+content-hash = "3fe1551677c62078ab07d3e368af3a42befafa2bd3321f44d169292bbdf2588b"

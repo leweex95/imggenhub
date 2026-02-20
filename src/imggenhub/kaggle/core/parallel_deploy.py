@@ -15,18 +15,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from imggenhub.kaggle.core import deploy, download
-from imggenhub.kaggle.utils import poll_status
+from kaggle_connector import JobManager, SelectiveDownloader
 from imggenhub.kaggle.utils.config_loader import load_kaggle_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# Kernel IDs for parallel execution
-DEPLOYMENT1_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment1"
-DEPLOYMENT2_KERNEL_ID = "leventecsibi/stable-diffusion-batch-generator-deployment2"
-
-# Threshold for parallel deployment
+# Constants for parallel execution
 PARALLEL_THRESHOLD = 4
+
+
+def get_deployment_ids(base_kernel_id: str) -> Tuple[str, str]:
+    """Generate deployment IDs based on base kernel ID."""
+    return f"{base_kernel_id}-deployment-1", f"{base_kernel_id}-deployment-2"
 
 
 def split_prompts(prompts: List[str]) -> Tuple[List[str], List[str]]:
@@ -49,126 +49,133 @@ def should_use_parallel(prompts: List[str]) -> bool:
     return len(prompts) > PARALLEL_THRESHOLD
 
 
-def _create_deployment2_kernel_dir(kernel_path: Path, notebook: Path) -> Path:
-    """
-    Create a temporary deployment2 kernel directory with its own metadata.
-    Copies only the needed notebook file and creates deployment2-specific metadata.
-    
-    Args:
-        kernel_path: Path to the deployment1 kernel config directory
-        notebook: Path to the notebook file to use
-        
-    Returns:
-        Path to temporary deployment2 kernel directory
-    """
-    # Create temp directory that persists until explicitly cleaned up
-    deployment2_dir = Path(tempfile.mkdtemp(prefix="kaggle_deployment2_"))
-    
-    # Copy the specific notebook file
-    notebook_name = notebook.name
-    source_notebook = kernel_path / notebook_name
-    if not source_notebook.exists():
-        source_notebook = notebook  # Use the notebook path directly
-    shutil.copy2(source_notebook, deployment2_dir / notebook_name)
-    
-    # Create deployment2-specific metadata
-    deployment1_metadata_path = kernel_path / "kernel-metadata.json"
-    with open(deployment1_metadata_path, "r", encoding="utf-8") as f:
-        metadata = json.load(f)
-    
-    # Modify for deployment2 kernel
-    metadata["id"] = DEPLOYMENT2_KERNEL_ID
-    metadata["title"] = "Stable Diffusion Batch Generator Deployment2"
-    metadata["code_file"] = notebook_name
-    
-    deployment2_metadata_path = deployment2_dir / "kernel-metadata.json"
-    with open(deployment2_metadata_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
-    
-    return deployment2_dir
-
 
 def _deploy_single_kernel(
     prompts_list: List[str],
     notebook: Path,
     kernel_path: Path,
     kernel_id: str,
-    deploy_kwargs: Dict[str, Any]
+    deploy_kwargs: Dict[str, Any],
+    accelerator: str = None
 ) -> str:
     """
-    Deploy a single kernel with given prompts.
+    Deploy a single kernel with given prompts using Kaggle Connector.
     
     Args:
         prompts_list: Prompts for this kernel
         notebook: Notebook path
         kernel_path: Kernel config directory
         kernel_id: Kernel identifier
-        deploy_kwargs: Additional kwargs for deploy.run
+        deploy_kwargs: Additional kwargs for JobManager
+        accelerator: Kaggle accelerator type
         
     Returns:
         Kernel ID that was deployed
     """
     logging.info(f"Deploying {len(prompts_list)} prompts to kernel: {kernel_id}")
     
-    # Deploy using standard deploy module (which now handles its own retry/wait logic)
-    deploy.run(
-        prompts_list=prompts_list,
-        notebook=notebook,
-        kernel_path=kernel_path,
-        **deploy_kwargs
-    )
-    logging.info(f"Successfully deployed kernel: {kernel_id}")
-    return kernel_id
+    # 1. Create a truly temporary deployment directory for this specific deployment
+    # This prevents cross-contamination and side effects on the source notebooks
+    with tempfile.TemporaryDirectory(prefix=f"kaggle_deploy_{kernel_id.split('/')[-1]}_") as tmp_dir:
+        tmp_dir_path = Path(tmp_dir)
+        nb_name = notebook.name
+        tmp_nb_path = tmp_dir_path / nb_name
+        
+        # Copy notebook to tmp dir
+        shutil.copy2(notebook, tmp_nb_path)
+        
+        manager = JobManager(kernel_id)
+        
+        # Prepare parameters for injection
+        params = {
+            "PROMPTS": prompts_list,
+            "MODEL_ID": deploy_kwargs.get("model_id"),
+            "GUIDANCE": deploy_kwargs.get("guidance"),
+            "STEPS": deploy_kwargs.get("steps"),
+            "PRECISION": deploy_kwargs.get("precision"),
+            "OUTPUT_DIR": ".",
+            "IMG_SIZE": deploy_kwargs.get("img_size"),
+            "KERNEL_ID": kernel_id
+        }
+        
+        # Flux GGUF specific
+        if "model_filename" in deploy_kwargs:
+            params["MODEL_FILENAME"] = deploy_kwargs.get("model_filename")
+        if "vae_repo_id" in deploy_kwargs:
+            params["VAE_REPO_ID"] = deploy_kwargs.get("vae_repo_id")
+        if "vae_filename" in deploy_kwargs:
+            params["VAE_FILENAME"] = deploy_kwargs.get("vae_filename")
+        
+        manager.edit_notebook_params(str(tmp_nb_path), params)
+        
+        # 2. Metadata configuration
+        gpu = deploy_kwargs.get("gpu", True)
+        username = deploy_kwargs.get("username", "leventecsibi")
+        dataset_sources = [f"{username}/imggenhub-hf-token"]
+        if "flux-gguf" in str(notebook).lower():
+             dataset_sources.extend([
+                f"{username}/flux1-schnell-q4-zip",
+                f"{username}/vae-zip",
+                f"{username}/clip-l-zip",
+                f"{username}/t5xxl-zip",
+                f"{username}/sd-build-zip"
+             ])
+        
+        kernel_type = "notebook" if nb_name.endswith(".ipynb") else "script"
+        manager.create_metadata(
+            str(tmp_dir_path),
+            kernel_id=kernel_id,
+            code_file=nb_name,
+            kernel_type=kernel_type,
+            enable_gpu=gpu,
+            dataset_sources=dataset_sources,
+            accelerator=accelerator
+        )
+        
+        # 3. Deploy
+        wait_min = deploy_kwargs.get("wait_timeout", 30)
+        manager.deploy(
+            str(tmp_dir_path), 
+            wait=True, 
+            timeout_min=wait_min
+        )
+        
+        logging.info(f"Successfully deployed kernel: {kernel_id}")
+        return kernel_id
 
 
 def _poll_kernel(kernel_id: str, max_wait: int = 1800, poll_interval: int = None) -> str:
     """
-    Poll a single kernel until completion with timeout.
-    
-    Args:
-        kernel_id: Kernel to poll
-        max_wait: Maximum wait time in seconds (default 30 min)
-        poll_interval: Interval in seconds between status polls
-        
-    Returns:
-        Final status
+    Poll a single kernel using JobManager.
     """
     if poll_interval is None:
         config = load_kaggle_config()
         poll_interval = config.get("polling_interval_seconds", 60)
     
     logging.info(f"Starting poll for kernel: {kernel_id}")
-    start_time = time.time()
+    manager = JobManager(kernel_id)
+    status = manager.poll_until_complete(poll_interval=poll_interval)
     
-    while (time.time() - start_time) < max_wait:
-        try:
-            status = poll_status.run(kernel_id=kernel_id, poll_interval=poll_interval)
-            logging.info(f"Kernel {kernel_id} finished with status: {status}")
-            return status
-        except Exception as e:
-            # If polling fails, wait and retry
-            logging.warning(f"Poll error for {kernel_id}: {e}. Retrying...")
-            time.sleep(poll_interval)
-    
-    logging.error(f"Kernel {kernel_id} timed out after {max_wait}s")
-    return "timeout"
-
-
-def _download_kernel_output(kernel_id: str, dest_path: Path) -> None:
-    """
-    Download output from a single kernel.
-    
-    Args:
-        kernel_id: Kernel to download from
-        dest_path: Destination directory
+    # Check for library-specific unknown status error
+    if "error_unknown_status" in status:
+        logging.error(f"Kernel {kernel_id} failed with unknown status (likely 404).")
+        raise RuntimeError(f"Kernel {kernel_id} unreachable: {status}")
         
-    Raises:
-        RuntimeError: If download fails
+    return status
+
+
+def _download_kernel_output(kernel_id: str, dest_path: Path, expected_count: int = 0) -> None:
     """
-    logging.info(f"Downloading output from kernel: {kernel_id}")
-    success = download.run(dest=dest_path, kernel_id=kernel_id)
+    Download output from a single kernel using SelectiveDownloader.
+    """
+    logging.info(f"Downloading output from kernel: {kernel_id} to {dest_path}")
+    downloader = SelectiveDownloader(kernel_id, dest=str(dest_path))
+    success = downloader.download_images(
+        expected_image_count=expected_count,
+        stable_count_patience=4
+    )
     if not success:
-        raise RuntimeError(f"Failed to download images from kernel {kernel_id}")
+        logging.warning(f"Selective download from {kernel_id} reported failure or timed out.")
 
 
 def run_parallel_pipeline(
@@ -179,6 +186,7 @@ def run_parallel_pipeline(
     wait_timeout: int = None,
     retry_interval: int = None,
     polling_interval: int = None,
+    accelerator: str = None,
     **deploy_kwargs
 ) -> None:
     """
@@ -195,6 +203,7 @@ def run_parallel_pipeline(
         wait_timeout: Maximum wait time in minutes for GPU availability
         retry_interval: Interval in seconds between retries
         polling_interval: Interval in seconds between status polls
+        accelerator: Kaggle accelerator type
         **deploy_kwargs: Additional arguments for deploy.run
     """
     # Load config for defaults if not provided
@@ -207,13 +216,19 @@ def run_parallel_pipeline(
         if polling_interval is None:
             polling_interval = config.get("polling_interval_seconds", 60)
 
+    # Resolve deployment IDs
+    base_kernel_id = deploy_kwargs.get("base_kernel_id", "leventecsibi/stable-diffusion-batch-generator")
+    deployment1_kernel_id, deployment2_kernel_id = get_deployment_ids(base_kernel_id)
+
     # Split prompts
     first_batch, second_batch = split_prompts(prompts_list)
-    logging.info(f"Splitting {len(prompts_list)} prompts: {len(first_batch)} (deployment1) + {len(second_batch)} (deployment2)")
-    
-    # Create temporary deployment2 kernel directory
-    deployment2_kernel_path = _create_deployment2_kernel_dir(kernel_path, notebook)
-    logging.info(f"Created deployment2 kernel directory: {deployment2_kernel_path}")
+    logging.info(f"Splitting {len(prompts_list)} prompts across 2 kernels:")
+    logging.info(f"  Kernel 1 ({deployment1_kernel_id}): {len(first_batch)} prompts")
+    for idx, p in enumerate(first_batch):
+        logging.info(f"    - [{idx+1}] {p}")
+    logging.info(f"  Kernel 2 ({deployment2_kernel_id}): {len(second_batch)} prompts")
+    for idx, p in enumerate(second_batch):
+        logging.info(f"    - [{idx+1}] {p}")
     
     try:
         # Deploy both kernels
@@ -226,8 +241,9 @@ def run_parallel_pipeline(
             prompts_list=first_batch,
             notebook=notebook,
             kernel_path=kernel_path,
-            kernel_id=DEPLOYMENT1_KERNEL_ID,
-            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval}
+            kernel_id=deployment1_kernel_id,
+            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval},
+            accelerator=accelerator
         )
         
         # Wait before deploying deployment2 to avoid API conflicts
@@ -235,25 +251,27 @@ def run_parallel_pipeline(
         time.sleep(15)
         
         # Deploy deployment2 kernel
-        deployment2_notebook = deployment2_kernel_path / notebook.name
         _deploy_single_kernel(
             prompts_list=second_batch,
-            notebook=deployment2_notebook,
-            kernel_path=deployment2_kernel_path,
-            kernel_id=DEPLOYMENT2_KERNEL_ID,
-            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval}
+            notebook=notebook,
+            kernel_path=kernel_path,
+            kernel_id=deployment2_kernel_id,
+            deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval},
+            accelerator=accelerator
         )
         
         logging.info("="*80)
-        logging.info("Both kernels deployed! Polling for completion...")
+        logging.info("Both kernels deployed! Waiting 30 seconds before polling...")
         logging.info("="*80)
+        
+        time.sleep(30)
         
         # Poll both kernels in parallel using threads
         statuses = {}
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
-                executor.submit(_poll_kernel, DEPLOYMENT1_KERNEL_ID, poll_interval=polling_interval): DEPLOYMENT1_KERNEL_ID,
-                executor.submit(_poll_kernel, DEPLOYMENT2_KERNEL_ID, poll_interval=polling_interval): DEPLOYMENT2_KERNEL_ID
+                executor.submit(_poll_kernel, deployment1_kernel_id, poll_interval=polling_interval): deployment1_kernel_id,
+                executor.submit(_poll_kernel, deployment2_kernel_id, poll_interval=polling_interval): deployment2_kernel_id
             }
             
             for future in as_completed(futures):
@@ -263,7 +281,7 @@ def run_parallel_pipeline(
                     statuses[kernel_id] = status
                 except Exception as e:
                     logging.error(f"Error polling kernel {kernel_id}: {e}")
-                    statuses[kernel_id] = "error"
+                    statuses[kernel_id] = f"error: {e}"
         
         # Log status summary
         logging.info("="*80)
@@ -272,12 +290,13 @@ def run_parallel_pipeline(
             logging.info(f"  {kid}: {status}")
         logging.info("="*80)
         
-        # Check for errors (only hard errors, not unknown/timeout which might still produce output)
-        errors = [kid for kid, status in statuses.items() 
-                  if "error" in status.lower()]
+        # Check for errors
+        errors = [kid for kid, status in statuses.items() if "error" in status.lower()]
         if errors:
             logging.error(f"The following kernels failed: {errors}")
-            raise RuntimeError(f"Kernel execution failed for: {errors}")
+            # Identify first error message
+            first_err = next((status for kid, status in statuses.items() if kid in errors), "Unknown error")
+            raise RuntimeError(f"Parallel kernel execution failed: {first_err}")
         
         logging.info("="*80)
         logging.info("Both kernels completed! Downloading outputs...")
@@ -289,19 +308,19 @@ def run_parallel_pipeline(
         deployment1_download_path.mkdir(parents=True, exist_ok=True)
         deployment2_download_path.mkdir(parents=True, exist_ok=True)
         
-        # Download from both kernels sequentially, handling failures gracefully
+        # Download from both kernels sequentially
         download_errors = []
         
-        logging.info(f"Downloading from deployment1 kernel: {DEPLOYMENT1_KERNEL_ID}")
+        logging.info(f"Downloading from deployment1 kernel: {deployment1_kernel_id}")
         try:
-            _download_kernel_output(DEPLOYMENT1_KERNEL_ID, deployment1_download_path)
+            _download_kernel_output(deployment1_kernel_id, deployment1_download_path, expected_count=len(first_batch))
         except Exception as e:
             logging.warning(f"Failed to download from deployment1: {e}")
             download_errors.append(("deployment1", str(e)))
         
-        logging.info(f"Downloading from deployment2 kernel: {DEPLOYMENT2_KERNEL_ID}")
+        logging.info(f"Downloading from deployment2 kernel: {deployment2_kernel_id}")
         try:
-            _download_kernel_output(DEPLOYMENT2_KERNEL_ID, deployment2_download_path)
+            _download_kernel_output(deployment2_kernel_id, deployment2_download_path, expected_count=len(second_batch))
         except Exception as e:
             logging.warning(f"Failed to download from deployment2: {e}")
             download_errors.append(("deployment2", str(e)))
@@ -319,20 +338,28 @@ def run_parallel_pipeline(
         final_images_path.mkdir(parents=True, exist_ok=True)
         
         image_extensions = (".png", ".jpg", ".jpeg")
-        image_count = 0
+        unique_images = {} # Map filename -> Path
         
         for temp_path in [deployment1_download_path, deployment2_download_path]:
+            if not temp_path.exists(): continue
             for image_file in temp_path.rglob("*"):
-                if image_file.is_file() and image_file.suffix.lower() in image_extensions:
-                    target = final_images_path / image_file.name
-                    # Handle name collisions
-                    counter = 1
-                    while target.exists():
-                        target = final_images_path / f"{image_file.stem}_{counter}{image_file.suffix}"
-                        counter += 1
-                    shutil.move(str(image_file), str(target))
-                    image_count += 1
-                    logging.info(f"  Collected: {target.name}")
+                # ONLY collect files that start with 'gen_' to avoid pulling stale artifacts
+                if image_file.is_file() and image_file.suffix.lower() in image_extensions and image_file.name.startswith("gen_"):
+                    # Deduplicate by filename
+                    if image_file.name not in unique_images:
+                        unique_images[image_file.name] = image_file
+        
+        image_count = 0
+        for name, source_path in unique_images.items():
+            target = final_images_path / name
+            # Handle name collisions if they occur across runs, but for this run we deduplicated
+            counter = 1
+            while target.exists():
+                target = final_images_path / f"{source_path.stem}_{counter}{source_path.suffix}"
+                counter += 1
+            shutil.move(str(source_path), str(target))
+            image_count += 1
+            logging.info(f"  Collected: {target.name}")
         
         # Check if we got the expected number of images
         expected_images = len(prompts_list)
@@ -357,7 +384,5 @@ def run_parallel_pipeline(
         logging.info("="*80)
         
     finally:
-        # Always clean up deployment2 kernel directory
-        if deployment2_kernel_path.exists():
-            shutil.rmtree(deployment2_kernel_path, ignore_errors=True)
-            logging.info(f"Cleaned up deployment2 directory: {deployment2_kernel_path}")
+        # Temp directories are already cleaned up or handled
+        pass

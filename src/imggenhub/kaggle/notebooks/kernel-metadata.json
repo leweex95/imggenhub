@@ -1,0 +1,17 @@
+{
+    "id": "leventecsibi/stable-diffusion-batch-generator-deployment-1",
+    "title": "stable-diffusion-batch-generator-deployment-1",
+    "code_file": "kaggle-stable-diffusion.ipynb",
+    "language": "python",
+    "kernel_type": "script",
+    "is_private": true,
+    "enable_gpu": true,
+    "enable_tpu": false,
+    "enable_internet": true,
+    "dataset_sources": [
+        "leventecsibi/imggenhub-hf-token"
+    ],
+    "competition_sources": [],
+    "kernel_sources": [],
+    "accelerator": "nvidia-t4-x2"
+}
