@@ -145,3 +145,51 @@ Note: Refiner-related flags are ignored for FLUX models
 To speed up inference, we upload the largest model files as a custom Kaggle dataset. This massively speeds up model inference as there is no need to fetch tens of GBs before every inference run.
 
 Note: temporarily switched off as we found that for FLUX.1-schnell models (and hence, likely for any large model) it actually takes more time to read these models from Kaggle datasets inside of a Kaggle notebook than downloading directly from Hugging Face.
+
+## Requesting specific GPU types on Kaggle
+
+Kaggle kernels accept an optional `accelerator` field in `kernel-metadata.json`. This repository's Kaggle connector provides a convenient way to set that field when creating a deployment. Two accelerator values are supported in our tooling:
+
+- `nvidia-t4-x2` — request two NVIDIA T4 GPUs (T4 x2)
+- `nvidia-p100` — request a single NVIDIA P100 GPU (P100)
+
+Important notes:
+- Kaggle may not always honor a specific accelerator if capacity is limited; it can fall back to an available GPU type.
+- The `accelerator` field is set through the deployment metadata and pushed with the kernel.
+
+Examples — using the provided example deployer (located at `kaggle_gpu_connector/examples/deploy_custom.py`):
+
+Request a P100 GPU:
+
+```powershell
+poetry run python kaggle_gpu_connector/examples/deploy_custom.py nvidia-p100
+```
+
+Request T4 x2 GPUs:
+
+```powershell
+poetry run python kaggle_gpu_connector/examples/deploy_custom.py nvidia-t4-x2
+```
+
+What the example does:
+- Creates a temporary `kernel-metadata.json` with the chosen `accelerator` value.
+- Converts the example Python script (`kaggle_gpu_connector/examples/custom_job.py`) to a notebook and uploads it as a Kaggle kernel.
+- Waits for resources, pushes the kernel, polls until completion, and then you can download the kernel output with the Kaggle CLI:
+
+```powershell
+poetry run kaggle kernels output <your-username>/<kernel-id> -p outputs/custom_test
+```
+
+If you want to manually create or edit metadata, ensure your `kernel-metadata.json` includes:
+
+```json
+{
+  "id": "username/your-kernel",
+  "code_file": "your_notebook.ipynb",
+  "kernel_type": "notebook",
+  "enable_gpu": true,
+  "accelerator": "nvidia-t4-x2"
+}
+```
+
+See `kaggle_gpu_connector/examples/deploy_custom.py` for a minimal programmatic example of creating metadata and deploying with either accelerator.
