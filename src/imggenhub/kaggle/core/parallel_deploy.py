@@ -24,6 +24,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 PARALLEL_THRESHOLD = 4
 
 
+def _notebook_to_script(nb_path: Path) -> str:
+    """Extract code cells from a notebook and return a Python script string."""
+    with open(nb_path, encoding="utf-8") as f:
+        nb = json.load(f)
+    code_blocks = []
+    for cell in nb.get("cells", []):
+        if cell.get("cell_type") != "code":
+            continue
+        src = cell.get("source", "")
+        code = "".join(src) if isinstance(src, list) else src
+        if code.strip():
+            code_blocks.append(code)
+    return "\n\n".join(code_blocks) + "\n"
+
+
 def get_deployment_ids(base_kernel_id: str) -> Tuple[str, str]:
     """Generate deployment IDs based on base kernel ID."""
     return f"{base_kernel_id}-deployment-1", f"{base_kernel_id}-deployment-2"
@@ -98,16 +113,30 @@ def _deploy_single_kernel(
             "KERNEL_ID": kernel_id
         }
         
+        # LoRA params for bf16 and dual-T4 notebooks
+        notebook_str = str(notebook).lower()
+        if "flux-schnell-bf16" in notebook_str or "flux-dual-t4" in notebook_str:
+            lora_repo_id = deploy_kwargs.get("lora_repo_id")
+            lora_filename = deploy_kwargs.get("lora_filename")
+            lora_scale = deploy_kwargs.get("lora_scale", 0.8)
+            if lora_repo_id: params["LORA_REPO_ID"] = lora_repo_id
+            if lora_filename: params["LORA_FILENAME"] = lora_filename
+            params["LORA_SCALE"] = lora_scale
+
         # Flux GGUF specific
-        if "model_filename" in deploy_kwargs:
-            params["MODEL_FILENAME"] = deploy_kwargs.get("model_filename")
-        if "vae_repo_id" in deploy_kwargs:
-            params["VAE_REPO_ID"] = deploy_kwargs.get("vae_repo_id")
-        if "vae_filename" in deploy_kwargs:
-            params["VAE_FILENAME"] = deploy_kwargs.get("vae_filename")
+        if "flux-gguf" in notebook_str:
+            if deploy_kwargs.get("model_filename"): params["MODEL_FILENAME"] = deploy_kwargs.get("model_filename")
+            if deploy_kwargs.get("vae_repo_id"): params["VAE_REPO_ID"] = deploy_kwargs.get("vae_repo_id")
+            if deploy_kwargs.get("vae_filename"): params["VAE_FILENAME"] = deploy_kwargs.get("vae_filename")
         
         manager.edit_notebook_params(str(tmp_nb_path), params)
-        
+
+        # Convert the params-injected notebook to a Python script. The Kaggle
+        # kernel is "script" type with code_file "imggenhub-generator.py".
+        script_content = _notebook_to_script(tmp_nb_path)
+        script_path = tmp_dir_path / "imggenhub-generator.py"
+        script_path.write_text(script_content, encoding="utf-8")
+
         # 2. Metadata configuration
         gpu = deploy_kwargs.get("gpu", True)
         username = deploy_kwargs.get("username", "leventecsibi")
@@ -120,12 +149,13 @@ def _deploy_single_kernel(
                 f"{username}/t5xxl-zip",
                 f"{username}/sd-build-zip"
              ])
-        
-        kernel_type = "notebook" if nb_name.endswith(".ipynb") else "script"
+
+        # All imggenhub Kaggle kernels were created as "script" type.
+        kernel_type = "script"
         manager.create_metadata(
             str(tmp_dir_path),
             kernel_id=kernel_id,
-            code_file=nb_name,
+            code_file="imggenhub-generator.py",
             kernel_type=kernel_type,
             enable_gpu=gpu,
             dataset_sources=dataset_sources,

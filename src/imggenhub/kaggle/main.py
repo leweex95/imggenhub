@@ -20,7 +20,26 @@ from imggenhub.kaggle.utils.config_loader import load_kaggle_config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, accelerator=None):
+def _notebook_to_script(nb_path: Path) -> str:
+    """Extract code cells from a notebook and return a Python script string.
+
+    The Kaggle imggenhub-generator kernel is "script" type, so we must push
+    a plain .py file. Pushing .ipynb directly causes Kaggle to only run Cell 0.
+    """
+    with open(nb_path, encoding="utf-8") as f:
+        nb = json.load(f)
+    code_blocks = []
+    for cell in nb.get("cells", []):
+        if cell.get("cell_type") != "code":
+            continue
+        src = cell.get("source", "")
+        code = "".join(src) if isinstance(src, list) else src
+        if code.strip():
+            code_blocks.append(code)
+    return "\n\n".join(code_blocks) + "\n"
+
+
+def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, accelerator=None, lora_repo_id=None, lora_filename=None, lora_scale=0.8):
     """Run Kaggle image generation pipeline: sync HF token -> deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
     cwd = Path(__file__).parent
@@ -121,6 +140,9 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             "clip_l_filename": clip_l_filename,
             "t5xxl_repo_id": t5xxl_repo_id,
             "t5xxl_filename": t5xxl_filename,
+            "lora_repo_id": lora_repo_id,
+            "lora_filename": lora_filename,
+            "lora_scale": lora_scale,
         }
         
         run_parallel_pipeline(
@@ -141,15 +163,32 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
 
     # Sequential deployment for 4 or fewer prompts
     logging.info("Deploying kernel using Kaggle Connector...")
-    
-    # 1. Prepare Notebook (parameters injection)
-    # We still need the original notebook to copy it to a temp location before editing
+
+    # Helper: get lastRunTime for this kernel from Kaggle kernels list
+    kernel_name = base_kernel_id.split("/")[-1]
+
+    def _get_last_run_time() -> str:
+        from kaggle_connector.utils.cli import run_kaggle_cli
+        r = run_kaggle_cli(["kernels", "list", "--mine", "--csv", "--search", kernel_name])
+        for line in r.stdout.splitlines():
+            if f"{base_kernel_id}," in line:
+                parts = line.split(",")
+                return parts[3].strip() if len(parts) > 3 else ""
+        return ""
+
+    # Record lastRunTime BEFORE push to detect when new run actually starts
+    pre_push_time = _get_last_run_time()
+    logging.info(f"Kernel last run time before push: {pre_push_time!r}")
+
+    # 1. Prepare Notebook (parameters injection) and convert to Python script
+    # The Kaggle kernel is "script" type and expects a .py file named
+    # "imggenhub-generator.py". We inject params into the notebook, then
+    # extract all code cells to produce the final Python script for pushing.
     with tempfile.TemporaryDirectory() as tmp_deploy_dir:
         tmp_dir_path = Path(tmp_deploy_dir)
-        nb_name = Path(notebook).name
-        tmp_nb_path = tmp_dir_path / nb_name
+        tmp_nb_path = tmp_dir_path / Path(notebook).name
         shutil.copy2(notebook, tmp_nb_path)
-        
+
         # Prepare parameters
         params = {
             "PROMPTS": prompts_list,
@@ -161,9 +200,16 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             "IMG_SIZE": img_size,
             "KERNEL_ID": base_kernel_id
         }
-        
+
+        # LoRA params for bf16 and dual-T4 notebooks
+        notebook_str = str(notebook).lower()
+        if "flux-schnell-bf16" in notebook_str or "flux-dual-t4" in notebook_str:
+            if lora_repo_id: params["LORA_REPO_ID"] = lora_repo_id
+            if lora_filename: params["LORA_FILENAME"] = lora_filename
+            params["LORA_SCALE"] = lora_scale
+
         # Flux GGUF specific
-        if "flux-gguf" in str(notebook).lower():
+        if "flux-gguf" in notebook_str:
             if model_filename: params["MODEL_FILENAME"] = model_filename
             if vae_repo_id: params["VAE_REPO_ID"] = vae_repo_id
             if vae_filename: params["VAE_FILENAME"] = vae_filename
@@ -171,21 +217,19 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             if clip_l_filename: params["CLIP_L_FILENAME"] = clip_l_filename
             if t5xxl_repo_id: params["T5XXL_REPO_ID"] = t5xxl_repo_id
             if t5xxl_filename: params["T5XXL_FILENAME"] = t5xxl_filename
-            
+
         manager = JobManager()
         manager.edit_notebook_params(str(tmp_nb_path), params)
-        
-        # DEBUG: Check if parameters were correctly injected
-        with open(tmp_nb_path, "r", encoding="utf-8") as f:
-            injected_nb = json.load(f)
-            for cell in injected_nb["cells"]:
-                if cell["cell_type"] == "code":
-                    src = "".join(cell["source"])
-                    logging.info(f"DEBUG: Cell source: {src[:500]}")
-                    if "PROMPTS =" in src:
-                        logging.info("VERIFICATION: Found PROMPTS in notebook.")
+
+        # Convert the params-injected notebook to a Python script. The Kaggle
+        # kernel is "script" type so Kaggle expects a plain .py file. Pushing
+        # an .ipynb would cause Kaggle to convert it incorrectly (only Cell 0).
+        script_content = _notebook_to_script(tmp_nb_path)
+        script_path = tmp_dir_path / "imggenhub-generator.py"
+        script_path.write_text(script_content, encoding="utf-8")
+
         dataset_sources = [f"{username}/imggenhub-hf-token"]
-        if "flux-gguf" in str(notebook).lower():
+        if "flux-gguf" in notebook_str:
              dataset_sources.extend([
                 f"{username}/flux1-schnell-q4-zip",
                 f"{username}/vae-zip",
@@ -193,38 +237,49 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
                 f"{username}/t5xxl-zip",
                 f"{username}/sd-build-zip"
              ])
-        
-        kernel_type = "notebook" if nb_name.endswith(".ipynb") else "script"
+
+        # Always "script" — imggenhub-generator kernel was created as script type.
+        kernel_type = "script"
         manager.create_metadata(
             str(tmp_dir_path),
             kernel_id=base_kernel_id,
-            code_file=nb_name,
+            code_file="imggenhub-generator.py",
             kernel_type=kernel_type,
             enable_gpu=gpu,
             dataset_sources=dataset_sources,
             accelerator=accelerator
         )
-        
-        # DEBUG: Print metadata
-        with open(tmp_dir_path / "kernel-metadata.json", "r") as f:
-            logging.info(f"VERIFICATION: Created metadata: {f.read()}")
-        
+
         # 3. Deploy
-        # We need to ensure the local kaggle-connector library is using the correct kernel_type
-        # If the library version is old, it might not support notebook type properly.
-        # But we saw in its code that it supports it via create_metadata.
-        
         manager.deploy(str(tmp_dir_path), wait=True)
-        
+
     logging.debug("Deploy step completed via connector")
 
     # Step 2: Poll status
-    # Wait for Kaggle API to register the new run
-    logging.info("Waiting 30 seconds for Kaggle API to register the new run...")
-    time.sleep(30)
-    
-    logging.info("Polling kernel status using Kaggle Connector...")
+    # After push, Kaggle keeps showing 'complete' (old run) until the new run starts.
+    # We detect a new run by watching kernel lastRunTime from 'kernels list'.
+    # Once lastRunTime advances past pre_push_time, the new run has started.
+    logging.info("Waiting for Kaggle to start the new kernel run...")
     manager = JobManager(base_kernel_id)
+    max_registration_wait = wait_timeout * 60  # honour user-configured timeout
+
+    wait_start = time.time()
+    while time.time() - wait_start < max_registration_wait:
+        current_time = _get_last_run_time()
+        if current_time and current_time != pre_push_time:
+            logging.info(f"New kernel run detected (lastRunTime: {current_time})")
+            break
+        reg_status = manager.get_status()
+        if "complete" not in reg_status and "unknown" not in reg_status:
+            logging.info(f"Kernel transitioned to status: {reg_status}")
+            break
+        elapsed = int(time.time() - wait_start)
+        logging.info(f"Waiting for new run to start... ({elapsed}s elapsed, lastRunTime={current_time!r})")
+        time.sleep(30)
+    else:
+        logging.warning(f"Timed out ({int(max_registration_wait)}s) waiting for new run; proceeding.")
+
+    logging.info("Polling kernel status using Kaggle Connector...")
     status = manager.poll_until_complete()
     logging.debug("Poll status completed")
 
@@ -299,7 +354,13 @@ def main():
     parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--wait_timeout", type=int, default=None, help="Maximum wait time in minutes for GPU availability (overrides YAML config)")
     parser.add_argument("--accelerator", type=str, default=None, choices=["nvidia-t4-x2", "nvidia-p100"], help="Kaggle accelerator type (e.g., nvidia-t4-x2, nvidia-p100)")
-    
+
+    # LoRA configuration for photorealism
+    parser.add_argument("--lora_repo_id", type=str, default=None, help="HuggingFace repo ID for LoRA weights (e.g. Shakker-Labs/FLUX.1-dev-LoRA-AntiBlur for photorealism)")
+    parser.add_argument("--lora_filename", type=str, default=None, help="LoRA weight filename. If not provided, the default file in the repo is used.")
+    parser.add_argument("--lora_scale", type=float, default=0.8, help="LoRA adapter scale / strength (default: 0.8)")
+    parser.add_argument("--enhance_photorealism", action="store_true", help="Append photography realism terms to all prompts (grain, skin texture, shallow depth of field, etc.)")
+
     # FLUX GGUF model configuration (quantized models only)
     parser.add_argument("--model_filename", type=str, default=None, help="Model filename for quantized GGUF models (e.g., flux1-schnell-Q4_0.gguf)")
     parser.add_argument("--vae_repo_id", type=str, default=None, help="FLUX GGUF ONLY: HuggingFace repo ID for VAE model (auto-resolved if not provided)")
@@ -336,6 +397,7 @@ def main():
         # Check if FLUX GGUF based on explicit parameters or model_id
         is_gguf = (args.model_filename or (args.model_id and _is_flux_gguf_model(args.model_id)))
         is_bf16 = args.model_id and _is_flux_bf16_model(args.model_id)
+        is_dual_t4 = args.accelerator == "nvidia-t4-x2"
         if is_gguf:
             args.notebook = str(Path(__file__).parent / "notebooks/kaggle-flux-gguf.ipynb")
             print(f"Auto-detected FLUX GGUF model, using notebook: {args.notebook}")
@@ -348,6 +410,15 @@ def main():
                 print("FLUX GGUF Q4 models cannot run on CPU (too slow and memory-intensive).")
                 print("Automatically enabling GPU mode...")
                 print("="*80 + "\n")
+                args.gpu = True
+        elif is_bf16 and is_dual_t4:
+            # T4×2: use device_map='balanced' notebook — no CPU offload, significantly faster
+            # Also supports larger models (FLUX.1-dev) across 2x16GB=32GB VRAM
+            args.notebook = str(Path(__file__).parent / "notebooks/kaggle-flux-dual-t4.ipynb")
+            print(f"Auto-detected FLUX bf16 + T4×2 accelerator, using optimized dual-GPU notebook: {args.notebook}")
+            print("  device_map='balanced' distributes model across both T4 GPUs (32GB total VRAM)")
+            print("  No sequential CPU offload → significantly faster inference")
+            if not args.gpu:
                 args.gpu = True
         elif is_bf16:
             args.notebook = str(Path(__file__).parent / "notebooks/kaggle-flux-schnell-bf16.ipynb")
@@ -395,7 +466,18 @@ def main():
             print(f"  - {valid_width}x{valid_height}")
             print("="*80 + "\n")
             return
-    
+
+    # Warn if guidance > 2.0 for FLUX bf16 models (photorealism best practice)
+    if args.model_id and _is_flux_bf16_model(args.model_id) and args.guidance > 2.0:
+        print("\n" + "="*80)
+        print("WARNING: HIGH GUIDANCE FOR FLUX BF16 MODEL!")
+        print("="*80)
+        print(f"You specified --guidance {args.guidance}")
+        print("For FLUX bf16 models, guidance 1.0-2.0 produces the most photorealistic results.")
+        print("Higher guidance often leads to over-saturated, synthetic-looking images.")
+        print("Proceeding anyway, but consider using --guidance 1.0 to 2.0 for better realism.")
+        print("="*80 + "\n")
+
     img_size = (args.img_height, args.img_width)
 
     # Precision is now required; no auto-detection
@@ -431,6 +513,17 @@ def main():
     except ValueError as e:
         print(f"Error: {e}")
         return
+
+    # Apply photorealism prompt enhancement if requested
+    if getattr(args, "enhance_photorealism", False) and args.prompt:
+        realism_suffix = (
+            "shot on 35mm film, Kodak Portra 400, shallow depth of field, "
+            "natural lighting, skin texture, pores, subtle grain, imperfect skin, "
+            "photorealistic, hyperrealistic"
+        )
+        args.prompt = [f"{p}, {realism_suffix}" for p in args.prompt]
+        print("Photorealism enhancement applied to all prompts.")
+
     run_pipeline(
         dest_path=dest_path,
         prompts_file=args.prompts_file,
@@ -458,10 +551,10 @@ def main():
         t5xxl_filename=args.t5xxl_filename,
         wait_timeout=args.wait_timeout,
         accelerator=args.accelerator,
+        lora_repo_id=args.lora_repo_id,
+        lora_filename=args.lora_filename,
+        lora_scale=args.lora_scale,
     )
-
-
-    # ...existing code...
 
 
 def _is_kaggle_model(model_id: str) -> bool:
