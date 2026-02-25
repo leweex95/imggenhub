@@ -23,6 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, accelerator=None):
     """Run Kaggle image generation pipeline: sync HF token -> deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
+    dest_path = Path(dest_path)
     cwd = Path(__file__).parent
 
     # Load Kaggle config
@@ -58,6 +59,12 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             
         if updated:
             logging.info(f"HF token dataset {hf_token_dataset} updated successfully")
+            propagation_wait = 90  # seconds; Kaggle dataset version propagation SLA
+            logging.info(
+                f"Dataset {hf_token_dataset} was updated. Waiting {propagation_wait}s "
+                f"for Kaggle to propagate the new version before deploying kernel..."
+            )
+            time.sleep(propagation_wait)
         else:
             logging.info(f"HF token dataset {hf_token_dataset} is already up-to-date")
     except Exception as e:
@@ -233,9 +240,19 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     logging.debug("Poll status completed")
 
     if "error" in status.lower():
-        log_path = dest_path / "stable-diffusion-batch-generator.log"
-        logging.error(f"Kernel failed. See log: {log_path}")
-        raise RuntimeError(f"Kaggle kernel {base_kernel_id} failed during image generation. Aborting pipeline.")
+        logging.error(f"Kernel {base_kernel_id} failed. Attempting to retrieve Kaggle output logs...")
+        try:
+            log_content = manager.get_logs()
+            if log_content:
+                logging.error(f"Kernel failure logs:\n{log_content}")
+            else:
+                logging.warning("No output logs available for failed kernel.")
+        except Exception as log_err:
+            logging.warning(f"Could not retrieve logs: {log_err}")
+        raise RuntimeError(
+            f"Kaggle kernel {base_kernel_id} failed during image generation. "
+            f"Check logs above for details."
+        )
 
     # Step 3: Download output (using selective downloader to get only images)
     logging.info("Downloading output artifacts (images only)...")

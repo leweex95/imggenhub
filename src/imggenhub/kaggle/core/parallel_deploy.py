@@ -308,8 +308,15 @@ def run_parallel_pipeline(
         if errors:
             logging.error(f"The following kernels failed: {errors}")
             # Identify first error message
-            first_err = next((status for kid, status in statuses.items() if kid in errors), "Unknown error")
-            raise RuntimeError(f"Parallel kernel execution failed: {first_err}")
+            err_kid = errors[0]
+            manager = JobManager(err_kid)
+            try:
+                logs = manager.get_logs()
+                msg = logs.strip() if logs else f"no logs available (status: {statuses[err_kid]})"
+            except Exception as e:
+                msg = f"could not retrieve logs: {e} (status: {statuses[err_kid]})"
+                
+            raise RuntimeError(f"Parallel kernel execution failed: {err_kid}\n{msg}")
         
         logging.info("="*80)
         logging.info("Both kernels completed! Downloading outputs...")
