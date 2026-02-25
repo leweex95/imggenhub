@@ -56,7 +56,8 @@ def _deploy_single_kernel(
     kernel_path: Path,
     kernel_id: str,
     deploy_kwargs: Dict[str, Any],
-    accelerator: str = None
+    accelerator: str = None,
+    index_offset: int = 0
 ) -> str:
     """
     Deploy a single kernel with given prompts using Kaggle Connector.
@@ -68,6 +69,7 @@ def _deploy_single_kernel(
         kernel_id: Kernel identifier
         deploy_kwargs: Additional kwargs for JobManager
         accelerator: Kaggle accelerator type
+        index_offset: Offset for image numbering
         
     Returns:
         Kernel ID that was deployed
@@ -90,7 +92,8 @@ def _deploy_single_kernel(
         params = {
             "PROMPTS": prompts_list,
             "OUTPUT_DIR": ".",
-            "KERNEL_ID": kernel_id
+            "KERNEL_ID": kernel_id,
+            "INDEX_OFFSET": index_offset
         }
         
         # Only add optional params if they are provided to avoid overwriting notebook defaults with None
@@ -244,28 +247,30 @@ def run_parallel_pipeline(
         logging.info("PARALLEL DEPLOYMENT: Deploying to 2 Kaggle kernels")
         logging.info("="*80)
         
-        # Deploy deployment1 kernel first
+        # Deploy deployment1 kernel first (no offset)
         _deploy_single_kernel(
             prompts_list=first_batch,
             notebook=notebook,
             kernel_path=kernel_path,
             kernel_id=deployment1_kernel_id,
             deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval},
-            accelerator=accelerator
+            accelerator=accelerator,
+            index_offset=0
         )
         
         # Wait before deploying deployment2 to avoid API conflicts
         logging.info("Waiting 15 seconds before deploying deployment2 kernel...")
         time.sleep(15)
         
-        # Deploy deployment2 kernel
+        # Deploy deployment2 kernel (with offset = size of first batch)
         _deploy_single_kernel(
             prompts_list=second_batch,
             notebook=notebook,
             kernel_path=kernel_path,
             kernel_id=deployment2_kernel_id,
             deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval},
-            accelerator=accelerator
+            accelerator=accelerator,
+            index_offset=len(first_batch)
         )
         
         logging.info("="*80)

@@ -14,6 +14,8 @@ ImgGenHub is a personal image generation hub that connects to web-based image ge
 
 #### **Kaggle-powered image generation**
 - **Automated pipeline**: Deploy → Monitor → Download workflow
+- **Parallel Execution**: Automatically splits large prompt batches across multiple GPUs.
+- **Descriptive Naming**: Generated images include a slugified version of the prompt for easy identification.
 - **Automated secret management**: Local `.env` secret detected and auto-uploaded to Kaggle dataset
 - **Multiple models**: Supports Stable Diffusion variants, Flux.1-schnell GGUF quantized (Q4) version and Flux.1-schnell bf16 version.
 
@@ -48,23 +50,27 @@ poetry run imggenhub \
   --img_width 1024 \
   --img_height 1024 \
   --precision bf16 \
-  --gpu
+  --gpu t4x2
 ```
 
 ### Multiple prompts via command line
+
+For larger batches (>4 prompts), ImgGenHub automatically splits the workload into two parallel kernels.
 
 ```bash
 poetry run imggenhub \
   --prompt "A serene mountain landscape at sunset" \
   --prompt "A bustling city street in the rain" \
   --prompt "An abstract geometric pattern" \
+  --prompt "A neon cyberpunk cityscape" \
+  --prompt "A futuristic laboratory" \
   --model_id "black-forest-labs/FLUX.1-schnell" \
   --steps 4 \
   --guidance 0.75 \
   --img_width 1024 \
   --img_height 1024 \
   --precision bf16 \
-  --gpu
+  --gpu p100
 ```
 
 ### FLUX.1-schnell quantized version (Q4_0 GGUF)
@@ -99,6 +105,35 @@ poetry run imggenhub \
   --gpu
 ```
 
+### 🎬 Storyteller Example (Parallel Mode)
+
+For cinematic storyboards or large batches, ImgGenHub splits prompts across multiple parallel Kaggle kernels to stay within runtime limits.
+
+<details>
+<summary><b>Example: 12-Beat Thriller Pipeline</b></summary>
+
+1. **Save prompts to `thriller.json`**:
+```json
+[
+  "minimalist black and white photo of a dark alley",
+  "minimalist red high heel shoe on a puddle",
+  "close up of a neon blinking open sign",
+  ...
+]
+```
+
+2. **Run across 2 parallel GPUs (T4 x2)**:
+```bash
+poetry run imggenhub --prompts_file thriller.json \
+  --model_id city96/FLUX.1-schnell-gguf \
+  --model_filename flux1-schnell-Q4_0.gguf \
+  --parallel_mode kaggle-t4-x2 \
+  --img_width 1024 --img_height 576 --steps 4 --gpu
+```
+
+_Outputs will be saved with descriptive names like `gen_p1_minimalist_black_and_white_pho...png`_
+</details>
+
 ### Stable diffusion XL with refiner 
 
 ```bash
@@ -118,9 +153,9 @@ poetry run imggenhub \
 ### **Supported flags**
 
 #### **General flags** (all models)
-- `--prompt`: Single prompt or multiple prompts (use flag multiple times)
-- `--prompts_file`: JSON file with multiple prompts  
-- `--gpu`: Enable GPU acceleration (required for FLUX.1 models)
+- `--prompt`: Single prompt or multiple prompts (use flag multiple times). Automatically enables parallel mode if >4 prompts are submitted.
+- `--prompts_file`: JSON file with multiple prompts. Automatically enables parallel mode if >4 prompts are submitted.
+- `--gpu [type]`: Enable GPU acceleration (required for FLUX.1 models). Optional type: `t4x2` (default) or `p100`.
 - `--steps`: Inference steps (50-100 for Stable Diffusion models, ~4 for FLUX)
 - `--guidance`: Prompt adherence strength (7-12 recommended for photorealism, 0.75-1.0 for FLUX)
 - `--precision`: Model precision (fp32/fp16/int8/int4 for base models; q4/q5/q6 for GGUF quantized models)
