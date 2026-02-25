@@ -75,9 +75,26 @@ poetry run imggenhub \
   --model_id "city96/FLUX.1-schnell-gguf" \
   --model_filename "flux1-schnell-Q4_0.gguf" \
   --steps 4 \
-  --guidance 0.8 \
-  --img_width 512 \
-  --img_height 512 \
+  --guidance 1.0 \
+  --img_width 1024 \
+  --img_height 1024 \
+  --precision q4 \
+  --gpu
+```
+
+### Multiple prompts via JSON file (Parallel Mode)
+
+For larger batches, ImgGenHub automatically splits prompts across multiple Kaggle kernels to stay within runtime limits and speed up generation.
+
+```bash
+poetry run imggenhub \
+  --prompts_file path/to/prompts.json \
+  --model_id "city96/FLUX.1-schnell-gguf" \
+  --model_filename "flux1-schnell-Q4_0.gguf" \
+  --steps 4 \
+  --guidance 1.0 \
+  --img_width 1024 \
+  --img_height 1024 \
   --precision q4 \
   --gpu
 ```
