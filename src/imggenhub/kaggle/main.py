@@ -103,6 +103,7 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             "username": username,
             "base_kernel_id": base_kernel_id,
             "gpu": gpu,
+            "model_id": model_id,
             "refiner_model_id": refiner_model_id,
             "guidance": guidance,
             "steps": steps,
