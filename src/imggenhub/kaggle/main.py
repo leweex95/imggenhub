@@ -23,6 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, model_id=None, refiner_model_id=None, prompt=None, prompts=None, guidance=None, steps=None, precision=None, negative_prompt=None, refiner_guidance=None, refiner_steps=None, refiner_precision=None, refiner_negative_prompt=None, img_size=None, model_filename=None, vae_repo_id=None, vae_filename=None, clip_l_repo_id=None, clip_l_filename=None, t5xxl_repo_id=None, t5xxl_filename=None, wait_timeout=None, accelerator=None):
     """Run Kaggle image generation pipeline: sync HF token -> deploy -> poll -> download"""
     print("Initializing run_pipeline in main.py...")
+    dest_path = Path(dest_path)
     cwd = Path(__file__).parent
 
     # Load Kaggle config
@@ -58,6 +59,12 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             
         if updated:
             logging.info(f"HF token dataset {hf_token_dataset} updated successfully")
+            propagation_wait = 90  # seconds; Kaggle dataset version propagation SLA
+            logging.info(
+                f"Dataset {hf_token_dataset} was updated. Waiting {propagation_wait}s "
+                f"for Kaggle to propagate the new version before deploying kernel..."
+            )
+            time.sleep(propagation_wait)
         else:
             logging.info(f"HF token dataset {hf_token_dataset} is already up-to-date")
     except Exception as e:
@@ -82,7 +89,10 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
         else:
             notebook = kernel_path / notebook.name  # Fallback to kernel path if not in notebooks
 
-    prompts_list = resolve_prompts(prompts_file, prompt)
+    if prompts:
+        prompts_list = prompts
+    else:
+        prompts_list = resolve_prompts(prompts_file, prompt)
 
     logging.debug(f"Resolved paths:\n prompts_file={prompts_file}\n notebook={notebook}\n kernel_path={kernel_path}\n dest={dest_path}")
 
@@ -103,6 +113,7 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
             "username": username,
             "base_kernel_id": base_kernel_id,
             "gpu": gpu,
+            "model_id": model_id,
             "refiner_model_id": refiner_model_id,
             "guidance": guidance,
             "steps": steps,
@@ -229,9 +240,19 @@ def run_pipeline(dest_path, prompts_file, notebook, kernel_path, gpu=False, mode
     logging.debug("Poll status completed")
 
     if "error" in status.lower():
-        log_path = dest_path / "stable-diffusion-batch-generator.log"
-        logging.error(f"Kernel failed. See log: {log_path}")
-        raise RuntimeError(f"Kaggle kernel {base_kernel_id} failed during image generation. Aborting pipeline.")
+        logging.error(f"Kernel {base_kernel_id} failed. Attempting to retrieve Kaggle output logs...")
+        try:
+            log_content = manager.get_logs()
+            if log_content:
+                logging.error(f"Kernel failure logs:\n{log_content}")
+            else:
+                logging.warning("No output logs available for failed kernel.")
+        except Exception as log_err:
+            logging.warning(f"Could not retrieve logs: {log_err}")
+        raise RuntimeError(
+            f"Kaggle kernel {base_kernel_id} failed during image generation. "
+            f"Check logs above for details."
+        )
 
     # Step 3: Download output (using selective downloader to get only images)
     logging.info("Downloading output artifacts (images only)...")
@@ -279,7 +300,6 @@ def main():
     parser.add_argument("--prompts_file", type=str, default=None, help="JSON file containing list of prompts")
     parser.add_argument("--notebook", type=str, default=None, help="Notebook to use (auto-detects based on model if not specified)")
     parser.add_argument("--kernel_path", type=str, default=str(Path(__file__).parent / "notebooks"))
-    parser.add_argument("--gpu", action="store_true", help="Enable GPU for the kernel")
     parser.add_argument("--dest", type=str, default=None, help="Optional prefix for output folder (default: timestamp only)")
     parser.add_argument("--output_base_dir", type=str, default=None, help="Base directory for output runs (default: current working directory)")
     parser.add_argument("--model_id", type=str, default=None, help="Model ID (HuggingFace repo ID) for all models. For quantized models, use GGUF repo ID.")
@@ -298,8 +318,11 @@ def main():
     parser.add_argument("--img_width", type=int, default=None, help="Image width (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--img_height", type=int, default=None, help="Image height (defaults: 1024 for stable diffusion, 512 for flux gguf)")
     parser.add_argument("--wait_timeout", type=int, default=None, help="Maximum wait time in minutes for GPU availability (overrides YAML config)")
-    parser.add_argument("--accelerator", type=str, default=None, choices=["nvidia-t4-x2", "nvidia-p100"], help="Kaggle accelerator type (e.g., nvidia-t4-x2, nvidia-p100)")
+    parser.add_argument("--gpu", type=str, nargs='?', const='t4x2', default=None, help="Enable GPU and optionally specify type: 't4x2' (nvidia-t4-x2) or 'p100' (nvidia-p100). Default is 't4x2' if used without value.")
     
+    # Allow passing prompts as positional arguments
+    parser.add_argument("prompts", nargs='*', help="List of prompts to generate. If provided, overrides --prompts_file and --prompt.")
+
     # FLUX GGUF model configuration (quantized models only)
     parser.add_argument("--model_filename", type=str, default=None, help="Model filename for quantized GGUF models (e.g., flux1-schnell-Q4_0.gguf)")
     parser.add_argument("--vae_repo_id", type=str, default=None, help="FLUX GGUF ONLY: HuggingFace repo ID for VAE model (auto-resolved if not provided)")
@@ -310,6 +333,17 @@ def main():
     parser.add_argument("--t5xxl_filename", type=str, default=None, help="FLUX GGUF ONLY: T5-XXL model filename (auto-resolved if not provided)")
 
     args = parser.parse_args()
+
+    # Handle --gpu value mapping
+    if args.gpu:
+        if args.gpu.lower() == 'p100':
+            args.accelerator = 'nvidia-p100'
+        else:
+            args.accelerator = 'nvidia-t4-x2'
+        args.gpu_bool = True
+    else:
+        args.accelerator = None
+        args.gpu_bool = False
 
     # Validate arguments strictly before any auto-detection or notebook selection
     try:
@@ -340,28 +374,30 @@ def main():
             args.notebook = str(Path(__file__).parent / "notebooks/kaggle-flux-gguf.ipynb")
             print(f"Auto-detected FLUX GGUF model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX GGUF models
-            if not args.gpu:
+            if not args.gpu_bool:
                 print("\n" + "="*80)
                 print("WARNING: FLUX GGUF Q4 MODELS REQUIRE GPU!")
                 print("="*80)
                 print("You did NOT specify --gpu flag.")
                 print("FLUX GGUF Q4 models cannot run on CPU (too slow and memory-intensive).")
-                print("Automatically enabling GPU mode...")
+                print("Automatically enabling GPU mode (T4 x2)...")
                 print("="*80 + "\n")
-                args.gpu = True
+                args.gpu_bool = True
+                args.accelerator = 'nvidia-t4-x2'
         elif is_bf16:
             args.notebook = str(Path(__file__).parent / "notebooks/kaggle-flux-schnell-bf16.ipynb")
             print(f"Auto-detected FLUX bf16 model, using notebook: {args.notebook}")
             # Enforce GPU for FLUX bf16 models
-            if not args.gpu:
+            if not args.gpu_bool:
                 print("\n" + "="*80)
                 print("WARNING: FLUX bf16 MODELS REQUIRE GPU!")
                 print("="*80)
                 print("You did NOT specify --gpu flag.")
                 print("FLUX bf16 models cannot run on CPU (too slow and memory-intensive).")
-                print("Automatically enabling GPU mode...")
+                print("Automatically enabling GPU mode (T4 x2)...")
                 print("="*80 + "\n")
-                args.gpu = True
+                args.gpu_bool = True
+                args.accelerator = 'nvidia-t4-x2'
         else:
             args.notebook = str(Path(__file__).parent / "notebooks/kaggle-stable-diffusion.ipynb")
             print(f"Using default notebook: {args.notebook}")
@@ -436,10 +472,11 @@ def main():
         prompts_file=args.prompts_file,
         notebook=args.notebook,
         kernel_path=args.kernel_path,
-        gpu=args.gpu,
+        gpu=args.gpu_bool,
         model_id=args.model_id,
         refiner_model_id=args.refiner_model_id,
         prompt=args.prompt,
+        prompts=args.prompts,
         guidance=args.guidance,
         steps=args.steps,
         precision=args.precision,

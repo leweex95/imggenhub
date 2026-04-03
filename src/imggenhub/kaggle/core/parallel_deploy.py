@@ -56,7 +56,8 @@ def _deploy_single_kernel(
     kernel_path: Path,
     kernel_id: str,
     deploy_kwargs: Dict[str, Any],
-    accelerator: str = None
+    accelerator: str = None,
+    index_offset: int = 0
 ) -> str:
     """
     Deploy a single kernel with given prompts using Kaggle Connector.
@@ -68,6 +69,7 @@ def _deploy_single_kernel(
         kernel_id: Kernel identifier
         deploy_kwargs: Additional kwargs for JobManager
         accelerator: Kaggle accelerator type
+        index_offset: Offset for image numbering
         
     Returns:
         Kernel ID that was deployed
@@ -89,22 +91,31 @@ def _deploy_single_kernel(
         # Prepare parameters for injection
         params = {
             "PROMPTS": prompts_list,
-            "MODEL_ID": deploy_kwargs.get("model_id"),
-            "GUIDANCE": deploy_kwargs.get("guidance"),
-            "STEPS": deploy_kwargs.get("steps"),
-            "PRECISION": deploy_kwargs.get("precision"),
             "OUTPUT_DIR": ".",
-            "IMG_SIZE": deploy_kwargs.get("img_size"),
-            "KERNEL_ID": kernel_id
+            "KERNEL_ID": kernel_id,
+            "INDEX_OFFSET": index_offset
         }
         
-        # Flux GGUF specific
-        if "model_filename" in deploy_kwargs:
-            params["MODEL_FILENAME"] = deploy_kwargs.get("model_filename")
-        if "vae_repo_id" in deploy_kwargs:
-            params["VAE_REPO_ID"] = deploy_kwargs.get("vae_repo_id")
-        if "vae_filename" in deploy_kwargs:
-            params["VAE_FILENAME"] = deploy_kwargs.get("vae_filename")
+        # Only add optional params if they are provided to avoid overwriting notebook defaults with None
+        optional_params = [
+            ("MODEL_ID", "model_id"),
+            ("GUIDANCE", "guidance"),
+            ("STEPS", "steps"),
+            ("PRECISION", "precision"),
+            ("IMG_SIZE", "img_size"),
+            ("MODEL_FILENAME", "model_filename"),
+            ("VAE_REPO_ID", "vae_repo_id"),
+            ("VAE_FILENAME", "vae_filename"),
+            ("CLIP_L_REPO_ID", "clip_l_repo_id"),
+            ("CLIP_L_FILENAME", "clip_l_filename"),
+            ("T5XXL_REPO_ID", "t5xxl_repo_id"),
+            ("T5XXL_FILENAME", "t5xxl_filename"),
+        ]
+        
+        for nb_key, kw_key in optional_params:
+            val = deploy_kwargs.get(kw_key)
+            if val is not None:
+                params[nb_key] = val
         
         manager.edit_notebook_params(str(tmp_nb_path), params)
         
@@ -236,28 +247,30 @@ def run_parallel_pipeline(
         logging.info("PARALLEL DEPLOYMENT: Deploying to 2 Kaggle kernels")
         logging.info("="*80)
         
-        # Deploy deployment1 kernel first
+        # Deploy deployment1 kernel first (no offset)
         _deploy_single_kernel(
             prompts_list=first_batch,
             notebook=notebook,
             kernel_path=kernel_path,
             kernel_id=deployment1_kernel_id,
             deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval},
-            accelerator=accelerator
+            accelerator=accelerator,
+            index_offset=0
         )
         
         # Wait before deploying deployment2 to avoid API conflicts
         logging.info("Waiting 15 seconds before deploying deployment2 kernel...")
         time.sleep(15)
         
-        # Deploy deployment2 kernel
+        # Deploy deployment2 kernel (with offset = size of first batch)
         _deploy_single_kernel(
             prompts_list=second_batch,
             notebook=notebook,
             kernel_path=kernel_path,
             kernel_id=deployment2_kernel_id,
             deploy_kwargs={**deploy_kwargs, "wait_timeout": wait_timeout, "retry_interval": retry_interval},
-            accelerator=accelerator
+            accelerator=accelerator,
+            index_offset=len(first_batch)
         )
         
         logging.info("="*80)
@@ -295,8 +308,15 @@ def run_parallel_pipeline(
         if errors:
             logging.error(f"The following kernels failed: {errors}")
             # Identify first error message
-            first_err = next((status for kid, status in statuses.items() if kid in errors), "Unknown error")
-            raise RuntimeError(f"Parallel kernel execution failed: {first_err}")
+            err_kid = errors[0]
+            manager = JobManager(err_kid)
+            try:
+                logs = manager.get_logs()
+                msg = logs.strip() if logs else f"no logs available (status: {statuses[err_kid]})"
+            except Exception as e:
+                msg = f"could not retrieve logs: {e} (status: {statuses[err_kid]})"
+                
+            raise RuntimeError(f"Parallel kernel execution failed: {err_kid}\n{msg}")
         
         logging.info("="*80)
         logging.info("Both kernels completed! Downloading outputs...")
@@ -343,8 +363,10 @@ def run_parallel_pipeline(
         for temp_path in [deployment1_download_path, deployment2_download_path]:
             if not temp_path.exists(): continue
             for image_file in temp_path.rglob("*"):
-                # ONLY collect files that start with 'gen_' to avoid pulling stale artifacts
-                if image_file.is_file() and image_file.suffix.lower() in image_extensions and image_file.name.startswith("gen_"):
+                # ONLY collect files that start with 'gen_' or 'generated_' to avoid pulling stale artifacts
+                is_image = image_file.is_file() and image_file.suffix.lower() in image_extensions
+                is_valid_prefix = image_file.name.startswith("gen_") or image_file.name.startswith("generated_")
+                if is_image and is_valid_prefix:
                     # Deduplicate by filename
                     if image_file.name not in unique_images:
                         unique_images[image_file.name] = image_file
